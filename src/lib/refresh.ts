@@ -1,47 +1,77 @@
-// Realtime refresh signal: broadcast only, no patient data in payloads.
-// The edge function broadcasts after writes; screens refetch via the API on signal.
 
 import { useEffect, useRef, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-const url = import.meta.env.VITE_SUPABASE_URL as string;
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+// Supabase configuration from the Vite environment.
+const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
-const client = createClient(url, anonKey, { realtime: { params: { eventsPerSecond: 5 } } });
+// Avoid crashing the entire React app when environment variables are missing.
+const client =
+  url && anonKey
+    ? createClient(url, anonKey, {
+        realtime: {
+          params: {
+            eventsPerSecond: 5,
+          },
+        },
+      })
+    : null;
 
-export function useRefreshSignal(onRefresh: () => void, scope?: string): boolean {
+export function useRefreshSignal(
+  onRefresh: () => void,
+  scope?: string,
+): boolean {
   const [live, setLive] = useState(false);
   const cbRef = useRef(onRefresh);
+
   cbRef.current = onRefresh;
 
   useEffect(() => {
-    const channel = client.channel('swasthya-live');
-    channel.on('broadcast', { event: 'refresh' }, (msg: { payload?: { scope?: string } }) => {
-      if (!scope || !msg.payload?.scope || msg.payload.scope === scope) {
-        cbRef.current();
-      }
-    })
+    if (!client) {
+      setLive(false);
+      return;
+    }
+
+    const supabase = client;
+    const channel = supabase.channel('swasthya-live');
+
+    channel
+      .on(
+        'broadcast',
+        { event: 'refresh' },
+        (msg: { payload?: { scope?: string } }) => {
+          if (
+            !scope ||
+            !msg.payload?.scope ||
+            msg.payload.scope === scope
+          ) {
+            cbRef.current();
+          }
+        },
+      )
       .subscribe((status: string) => {
         setLive(status === 'SUBSCRIBED');
       });
 
-    const recon = setInterval(() => {
-      if (channel.state !== 'joined') client.removeChannel(channel);
-    }, 30000);
-
     return () => {
-      clearInterval(recon);
-      client.removeChannel(channel);
+      void supabase.removeChannel(channel);
     };
   }, [scope]);
 
   return live;
 }
 
-// Poll fallback for environments where realtime is blocked: refetch every 15s.
-export function usePollFallback(onRefresh: () => void, ms = 15000) {
+// Polling fallback for environments where realtime is unavailable.
+export function usePollFallback(
+  onRefresh: () => void,
+  ms = 15000,
+): void {
   useEffect(() => {
-    const iv = setInterval(onRefresh, ms);
-    return () => clearInterval(iv);
+    const interval = setInterval(onRefresh, ms);
+
+    return () => {
+      clearInterval(interval);
+    };
   }, [onRefresh, ms]);
 }

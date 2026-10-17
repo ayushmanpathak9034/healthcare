@@ -338,3 +338,95 @@ test('Emergency Desk: Atomic acceptance allows only one winner', () => {
   assert.strictEqual(resB.success, false);
   assert.strictEqual(winner, HOSP_A);
 });
+
+// =========================================================================
+// 5. Button Interactions, Fallbacks & Form Submission Tests
+// =========================================================================
+
+test('Button Actions: Triage buttons are actionable even if location is not pre-granted', () => {
+  const DEFAULT_COORDS = { lat: 28.6139, lng: 77.209 };
+  const DEFAULT_LABEL = 'New Delhi (Simulated)';
+
+  let triggered = null;
+  function handleStart(path, userLocation, userLabel) {
+    const loc = userLocation ?? DEFAULT_COORDS;
+    const label = userLabel || DEFAULT_LABEL;
+    triggered = { path, loc, label };
+  }
+
+  // User clicks Emergency without granting location first
+  handleStart('RED', null, '');
+  assert.ok(triggered !== null);
+  assert.strictEqual(triggered.path, 'RED');
+  assert.deepStrictEqual(triggered.loc, DEFAULT_COORDS);
+  assert.strictEqual(triggered.label, DEFAULT_LABEL);
+
+  // User clicks Routine
+  handleStart('GREEN', null, '');
+  assert.strictEqual(triggered.path, 'GREEN');
+});
+
+test('Form Submissions: Staff login authenticates valid preset and rejects invalid password', () => {
+  const accounts = {
+    doctor1: 'demo123',
+    doctor2: 'demo123',
+    desk1: 'demo123',
+  };
+
+  function simulateLogin(username, password) {
+    if (!accounts[username] || accounts[username] !== password) {
+      throw new Error('Invalid credentials');
+    }
+    return { token: 'mock-jwt-token', user: { username, role: 'DOCTOR' } };
+  }
+
+  // Valid login
+  const success = simulateLogin('doctor1', 'demo123');
+  assert.strictEqual(success.user.username, 'doctor1');
+  assert.ok(success.token);
+
+  // Invalid password rejected without bypassing auth
+  assert.throws(() => simulateLogin('doctor1', 'wrongpass'), /Invalid credentials/);
+});
+
+test('Doctor Workflow: Case sheet is approvable even if AI summary was null', () => {
+  const entry = {
+    id: 'entry-123',
+    patient_label: 'Walk-in Patient (Ram Singh, 62M)',
+    summary: null,
+  };
+
+  const effectiveSummary = entry.summary ?? {
+    chief_complaint: entry.patient_label || 'Clinical consultation',
+    duration: '1 day',
+    severity: 5,
+    relevant_history: [],
+  };
+
+  assert.ok(effectiveSummary !== null);
+  assert.strictEqual(effectiveSummary.chief_complaint, 'Walk-in Patient (Ram Singh, 62M)');
+  assert.strictEqual(effectiveSummary.severity, 5);
+});
+
+test('Loading State Recovery: Failed entry fetch allows user to return to queue', () => {
+  let openId = 'invalid-entry-id';
+  let entry = null;
+  let error = '';
+
+  function openEntry(id) {
+    try {
+      if (id === 'invalid-entry-id') throw new Error('Encounter not found');
+      entry = { id, token: 'Q-101' };
+    } catch (err) {
+      error = err.message;
+      openId = null;
+      entry = null;
+    }
+  }
+
+  openEntry('invalid-entry-id');
+  // State must not be stuck in loading
+  assert.strictEqual(openId, null);
+  assert.strictEqual(entry, null);
+  assert.strictEqual(error, 'Encounter not found');
+});

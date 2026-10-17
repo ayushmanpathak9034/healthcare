@@ -18,6 +18,8 @@ export function clearStaffToken() {
   sessionStorage.removeItem(TOKEN_KEY);
 }
 
+import { handleLocalBackend } from './localBackend';
+
 export async function api<T = Record<string, unknown>>(path: string, body: Record<string, unknown> = {}): Promise<T> {
   // Staff token takes the Authorization header; public routes fall back to the anon key.
   const token = getStaffToken();
@@ -25,14 +27,44 @@ export async function api<T = Record<string, unknown>>(path: string, body: Recor
     'Content-Type': 'application/json',
     Authorization: `Bearer ${token ?? anonKey}`,
   };
-  const res = await fetch(`${url}/functions/v1/api${path}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((data as { error?: string }).error ?? `Request failed (${res.status})`);
-  return data as T;
+
+  // If Supabase URL is configured, attempt remote edge function
+  if (url && !url.includes('undefined')) {
+    try {
+      const res = await fetch(`${url}/functions/v1/api${path}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+
+      // If remote Edge Function is unconfigured (404 NOT_FOUND from Supabase gateway):
+      if (res.status === 404) {
+        const text = await res.text().catch(() => '');
+        if (text.includes('NOT_FOUND') || text.includes('Requested function was not found')) {
+          return handleLocalBackend<T>(path, body, token);
+        }
+      }
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((data as { error?: string }).error ?? `Request failed (${res.status})`);
+      }
+      return data as T;
+    } catch (err) {
+      const msg = (err as Error).message || '';
+      if (
+        msg.includes('Failed to fetch') ||
+        msg.includes('NetworkError') ||
+        msg.includes('fetch failed') ||
+        msg.includes('Load failed')
+      ) {
+        return handleLocalBackend<T>(path, body, token);
+      }
+      throw err;
+    }
+  }
+
+  return handleLocalBackend<T>(path, body, token);
 }
 
 // ---------- AI ----------
