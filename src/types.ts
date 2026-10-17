@@ -18,54 +18,6 @@ export const LANGUAGES: LanguageOption[] = [
   { code: 'te-IN', label: 'Telugu (coming soon)', native: 'తెలుగు (coming soon)' },
 ];
 
-export interface ScoreBreakdown {
-  urgency: number;
-  red_flag: number;
-  vulnerability: number;
-  waiting_minutes: number;
-  total: number;
-  red_flag_reasons: string[];
-  vulnerability_reasons: string[];
-}
-
-export type DeclineReason = 'no bed' | 'no specialist' | 'no equipment' | 'other';
-export type ResourceAvailability = 'AVAILABLE' | 'LOW' | 'OUT';
-
-export interface ResourceItem {
-  id: string;
-  name: string;
-  category: 'MEDICINE' | 'EQUIPMENT' | 'SUPPLY';
-  status: ResourceAvailability;
-  updated_at: string;
-}
-
-export interface BedCategoryCount {
-  type: 'ICU' | 'EMERGENCY' | 'MATERNITY' | 'GENERAL';
-  available: number;
-  total: number;
-  held: number;
-  updated_at: string;
-}
-
-export interface RecentDecision {
-  id: string;
-  request_id: string;
-  patient_label: string;
-  decision: 'ACCEPTED' | 'DECLINED';
-  reason?: string;
-  timestamp: string;
-}
-
-export interface AuditLogEntry {
-  id: string;
-  ts: string;
-  role: string;
-  action: string;
-  patient_ref: string;
-  is_break_glass?: boolean;
-  details?: Record<string, unknown> | null;
-}
-
 export type {
   Hospital,
   IntakeResult,
@@ -76,4 +28,13 @@ export type {
   QueueRow,
   StaffUser,
   QueueStatusResult,
+  ScoreBreakdown,
+  DeclineReason,
+  ResourceAvailability,
+  ResourceItem,
+  BedCategoryCount,
+  RecentDecision,
+  EmergencyCardRow,
+  AdminOverview,
+  AdminHospital,
 } from '@/lib/api';
