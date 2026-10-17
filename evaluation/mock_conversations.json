@@ -1,0 +1,350 @@
+[
+  {
+    "case_id": "EMERGENCY_01",
+    "language": "en",
+    "transcript": "My father is having sudden crushing chest pain that radiates to his left arm and jaw. He is sweating cold profusely.",
+    "expected_urgency": "red",
+    "is_emergency": true,
+    "expected_red_flag_type": "chest_pain",
+    "ground_truth": {
+      "chief_complaint": "chest pain",
+      "symptoms": ["chest_pain"],
+      "duration_bucket": "<1h"
+    }
+  },
+  {
+    "case_id": "EMERGENCY_02",
+    "language": "hi",
+    "transcript": "अचानक सांस लेने में भारी तकलीफ हो रही है, दम घुट रहा है और बोल नहीं पा रहे।",
+    "expected_urgency": "red",
+    "is_emergency": true,
+    "expected_red_flag_type": "breathing_difficulty",
+    "ground_truth": {
+      "chief_complaint": "breathing_difficulty",
+      "symptoms": ["shortness_of_breath"],
+      "duration_bucket": "<1h"
+    }
+  },
+  {
+    "case_id": "EMERGENCY_03",
+    "language": "hinglish",
+    "transcript": "Dadi ji ka achanak chehra tedha ho gaya hai aur unki awaz ladkhada rahi hai, daaya hath kaam nahi kar raha.",
+    "expected_urgency": "red",
+    "is_emergency": true,
+    "expected_red_flag_type": "stroke_signs",
+    "ground_truth": {
+      "chief_complaint": "facial droop and slurred speech",
+      "symptoms": ["weakness"],
+      "duration_bucket": "<1h"
+    }
+  },
+  {
+    "case_id": "EMERGENCY_04",
+    "language": "hinglish",
+    "transcript": "Khet me paani lagate waqt pair me saanp ne kaat liya hai, 15 minute pehle.",
+    "expected_urgency": "red",
+    "is_emergency": true,
+    "expected_red_flag_type": "snakebite",
+    "ground_truth": {
+      "chief_complaint": "snakebite",
+      "symptoms": ["snakebite"],
+      "duration_bucket": "<1h"
+    }
+  },
+  {
+    "case_id": "EMERGENCY_05",
+    "language": "en",
+    "transcript": "There was a machine cut and he is suffering from heavy bleeding that won't stop with pressure.",
+    "expected_urgency": "red",
+    "is_emergency": true,
+    "expected_red_flag_type": "heavy_bleeding",
+    "ground_truth": {
+      "chief_complaint": "heavy bleeding",
+      "symptoms": ["bleeding", "injury"],
+      "duration_bucket": "<1h"
+    }
+  },
+  {
+    "case_id": "EMERGENCY_06",
+    "language": "hi",
+    "transcript": "मरीज अचानक चक्कर खाकर गिर गया और पूरी तरह बेहोश हो गया है, कोई जवाब नहीं दे रहा।",
+    "expected_urgency": "red",
+    "is_emergency": true,
+    "expected_red_flag_type": "unconsciousness",
+    "ground_truth": {
+      "chief_complaint": "unconsciousness",
+      "symptoms": ["dizziness"],
+      "duration_bucket": "<1h"
+    }
+  },
+  {
+    "case_id": "EMERGENCY_07",
+    "language": "hinglish",
+    "transcript": "Unhone galti se ghar me rakha zehrila padarth pee liya hai aur muh se jhaag aa raha hai.",
+    "expected_urgency": "red",
+    "is_emergency": true,
+    "expected_red_flag_type": "poisoning",
+    "ground_truth": {
+      "chief_complaint": "poisoning",
+      "symptoms": ["vomiting"],
+      "duration_bucket": "<1h"
+    }
+  },
+  {
+    "case_id": "EMERGENCY_08",
+    "language": "hinglish",
+    "transcript": "Bache ko achanak mirgi ka daura pad gaya hai aur jhatke aa rahe hain pichhle 5 minute se.",
+    "expected_urgency": "red",
+    "is_emergency": true,
+    "expected_red_flag_type": "seizure",
+    "ground_truth": {
+      "chief_complaint": "seizure",
+      "symptoms": ["weakness"],
+      "duration_bucket": "<1h"
+    }
+  },
+  {
+    "case_id": "EMERGENCY_09",
+    "language": "en",
+    "transcript": "He has a severe allergic reaction, throat is swelling shut and cannot breathe after eating peanuts.",
+    "expected_urgency": "red",
+    "is_emergency": true,
+    "expected_red_flag_type": "anaphylaxis",
+    "ground_truth": {
+      "chief_complaint": "severe allergic reaction",
+      "symptoms": ["shortness_of_breath"],
+      "duration_bucket": "<1h"
+    }
+  },
+  {
+    "case_id": "EMERGENCY_10",
+    "language": "hinglish",
+    "transcript": "Bike se fisal kar gir gaye, sir par gehri chot aayi hai aur hosh me nahi hai.",
+    "expected_urgency": "red",
+    "is_emergency": true,
+    "expected_red_flag_type": "unconsciousness",
+    "ground_truth": {
+      "chief_complaint": "head injury and unconsciousness",
+      "symptoms": ["injury"],
+      "duration_bucket": "<1h"
+    }
+  },
+  {
+    "case_id": "URGENT_11",
+    "language": "hinglish",
+    "transcript": "Pichhle 2 din se bukhar aur khansi hai, bukhar 102 degree hai aur thand lag rahi hai.",
+    "expected_urgency": "yellow",
+    "is_emergency": false,
+    "has_moderate_concern": true,
+    "ground_truth": {
+      "chief_complaint": "fever",
+      "symptoms": ["fever", "cough"],
+      "duration_bucket": "1-3d"
+    }
+  },
+  {
+    "case_id": "URGENT_12",
+    "language": "hinglish",
+    "transcript": "Aaj subah se pet ke dahine hisse me bohot tez pet dard ho raha hai aur ulti jaisa lag raha hai.",
+    "expected_urgency": "yellow",
+    "is_emergency": false,
+    "ground_truth": {
+      "chief_complaint": "abdominal pain",
+      "symptoms": ["abdominal_pain", "vomiting"],
+      "duration_bucket": "1-6h"
+    }
+  },
+  {
+    "case_id": "URGENT_13",
+    "language": "en",
+    "transcript": "Severe right flank kidney stone pain shooting downwards since 4 hours. Nausea is present.",
+    "expected_urgency": "yellow",
+    "is_emergency": false,
+    "ground_truth": {
+      "chief_complaint": "back pain",
+      "symptoms": ["back_pain", "vomiting"],
+      "duration_bucket": "1-6h"
+    }
+  },
+  {
+    "case_id": "URGENT_14",
+    "language": "hinglish",
+    "transcript": "Haath par kaanch lag gaya hai, taake lagwane padenge par khoon dabane se ruk gaya hai.",
+    "expected_urgency": "yellow",
+    "is_emergency": false,
+    "ground_truth": {
+      "chief_complaint": "injury",
+      "symptoms": ["injury"],
+      "duration_bucket": "1-6h"
+    }
+  },
+  {
+    "case_id": "URGENT_15",
+    "language": "en",
+    "transcript": "Elderly patient has high fever with chills and vomiting since yesterday and cannot keep fluids down.",
+    "expected_urgency": "yellow",
+    "is_emergency": false,
+    "has_moderate_concern": true,
+    "ground_truth": {
+      "chief_complaint": "fever",
+      "symptoms": ["fever", "vomiting"],
+      "duration_bucket": "6-24h"
+    }
+  },
+  {
+    "case_id": "URGENT_16",
+    "language": "hinglish",
+    "transcript": "BP 180 ho gaya hai aur bohot tez sir dard ho raha hai subah se, aakho ke aage dhundhla lag raha hai.",
+    "expected_urgency": "yellow",
+    "is_emergency": false,
+    "ground_truth": {
+      "chief_complaint": "headache",
+      "symptoms": ["headache", "dizziness"],
+      "duration_bucket": "1-6h"
+    }
+  },
+  {
+    "case_id": "URGENT_17",
+    "language": "hi",
+    "transcript": "कल रात से लगातार उल्टी और पेट दर्द है, कुछ भी पच नहीं रहा।",
+    "expected_urgency": "yellow",
+    "is_emergency": false,
+    "ground_truth": {
+      "chief_complaint": "vomiting and abdominal pain",
+      "symptoms": ["vomiting", "abdominal_pain"],
+      "duration_bucket": "6-24h"
+    }
+  },
+  {
+    "case_id": "URGENT_18",
+    "language": "en",
+    "transcript": "Spreading hot red rash and swelling on the left leg with moderate fever since 2 days.",
+    "expected_urgency": "yellow",
+    "is_emergency": false,
+    "ground_truth": {
+      "chief_complaint": "rash",
+      "symptoms": ["rash", "fever"],
+      "duration_bucket": "1-3d"
+    }
+  },
+  {
+    "case_id": "ROUTINE_19",
+    "language": "hinglish",
+    "transcript": "Do din se thoda sa zukaam aur halki khansi hai, bukhar nahi hai.",
+    "expected_urgency": "green",
+    "is_emergency": false,
+    "ground_truth": {
+      "chief_complaint": "cold",
+      "symptoms": ["cold", "cough"],
+      "duration_bucket": "1-3d"
+    }
+  },
+  {
+    "case_id": "ROUTINE_20",
+    "language": "en",
+    "transcript": "I need my regular monthly refill of blood pressure tablet amlodipine 5mg. Feeling fine otherwise.",
+    "expected_urgency": "green",
+    "is_emergency": false,
+    "ground_truth": {
+      "chief_complaint": "medication refill",
+      "symptoms": [],
+      "duration_bucket": "unknown"
+    }
+  },
+  {
+    "case_id": "ROUTINE_21",
+    "language": "hinglish",
+    "transcript": "Ghutne me chalkar aane par halka dard hota hai pichhle 2 hafte se.",
+    "expected_urgency": "green",
+    "is_emergency": false,
+    "ground_truth": {
+      "chief_complaint": "joint pain",
+      "symptoms": ["joint_pain"],
+      "duration_bucket": ">3d"
+    }
+  },
+  {
+    "case_id": "ROUTINE_22",
+    "language": "hi",
+    "transcript": "त्वचा पर हल्की खुजली और चकत्ते हो गए हैं चार दिनों से।",
+    "expected_urgency": "green",
+    "is_emergency": false,
+    "ground_truth": {
+      "chief_complaint": "rash",
+      "symptoms": ["rash"],
+      "duration_bucket": ">3d"
+    }
+  },
+  {
+    "case_id": "ROUTINE_23",
+    "language": "hinglish",
+    "transcript": "Khana khane ke baad seene me halki jalan hoti hai, acidity ki dikkat hai.",
+    "expected_urgency": "green",
+    "is_emergency": false,
+    "ground_truth": {
+      "chief_complaint": "acidity",
+      "symptoms": ["abdominal_pain"],
+      "duration_bucket": "unknown"
+    }
+  },
+  {
+    "case_id": "ROUTINE_24",
+    "language": "en",
+    "transcript": "Mild dry cough and throat tickle since yesterday morning, temperature is normal.",
+    "expected_urgency": "green",
+    "is_emergency": false,
+    "ground_truth": {
+      "chief_complaint": "cough",
+      "symptoms": ["cough", "sore_throat"],
+      "duration_bucket": "6-24h"
+    }
+  },
+  {
+    "case_id": "TRICKY_NEGATION_25",
+    "language": "en",
+    "transcript": "I have lower back pain from lifting boxes, but definitely no chest pain, no breathlessness, and no weakness.",
+    "expected_urgency": "green",
+    "is_emergency": false,
+    "ground_truth": {
+      "chief_complaint": "back pain",
+      "symptoms": ["back_pain"],
+      "duration_bucket": "unknown"
+    }
+  },
+  {
+    "case_id": "TRICKY_NEGATION_26",
+    "language": "hinglish",
+    "transcript": "Chhati me dard nahi hai, bas halka sa bukhar aur badan dard hai kal se.",
+    "expected_urgency": "green",
+    "is_emergency": false,
+    "ground_truth": {
+      "chief_complaint": "fever",
+      "symptoms": ["fever", "body_ache"],
+      "duration_bucket": "6-24h"
+    }
+  },
+  {
+    "case_id": "TRICKY_NEGATION_27",
+    "language": "hi",
+    "transcript": "हल्की खांसी और सिर दर्द है पर सीने में दर्द नहीं है बिल्कुल भी।",
+    "expected_urgency": "green",
+    "is_emergency": false,
+    "ground_truth": {
+      "chief_complaint": "cough and headache",
+      "symptoms": ["cough", "headache"],
+      "duration_bucket": "unknown"
+    }
+  },
+  {
+    "case_id": "TRICKY_NEGATION_28",
+    "language": "en",
+    "transcript": "Patient twisted their right ankle, has swelling, denies shortness of breath or dizziness or fainting.",
+    "expected_urgency": "green",
+    "is_emergency": false,
+    "ground_truth": {
+      "chief_complaint": "injury",
+      "symptoms": ["injury"],
+      "duration_bucket": "unknown"
+    }
+  }
+]
