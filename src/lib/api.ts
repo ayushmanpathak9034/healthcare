@@ -147,16 +147,57 @@ export const geocode = (query: string) =>
   api<{ result: { lat: number; lng: number; label: string; estimated: boolean } | null }>('/maps/geocode', { query });
 
 // ---------- staff ----------
+// ---------- staff ----------
+export interface ScoreBreakdown {
+  urgency: number;
+  red_flag: number;
+  vulnerability: number;
+  waiting_minutes: number;
+  waiting_points: number;
+  total: number;
+  red_flag_reasons: string[];
+  vulnerability_reasons: string[];
+}
+
+export type DeclineReason = 'no bed' | 'no specialist' | 'no equipment' | 'other';
+export type ResourceAvailability = 'AVAILABLE' | 'LOW' | 'OUT';
+
+export interface ResourceItem {
+  id: string;
+  name: string;
+  category: 'MEDICINE' | 'EQUIPMENT' | 'SUPPLY';
+  status: ResourceAvailability;
+  updated_at: string;
+}
+
+export interface BedCategoryCount {
+  type: 'ICU' | 'EMERGENCY' | 'MATERNITY' | 'GENERAL';
+  available: number;
+  total: number;
+  held: number;
+  updated_at: string;
+}
+
+export interface RecentDecision {
+  id: string;
+  request_id: string;
+  patient_label: string;
+  decision: 'ACCEPTED' | 'DECLINED';
+  reason?: string;
+  timestamp: string;
+}
+
 export interface StaffUser {
   id: string;
   username: string;
-  role: 'DOCTOR' | 'RECEPTION' | 'ADMIN';
+  role: 'DOCTOR' | 'RECEPTION' | 'ADMIN' | 'HOSPITAL_DESK';
   display_name: string;
   hospital_id: string | null;
+  hospital_name?: string | null;
 }
 
-export const staffLogin = (username: string, password: string) =>
-  api<{ token: string; user: StaffUser }>('/staff/login', { username, password });
+export const staffLogin = (username: string, password: string, hospital_id?: string) =>
+  api<{ token: string; user: StaffUser }>('/staff/login', { username, password, hospital_id });
 
 export interface QueueRow {
   id?: string;
@@ -167,8 +208,10 @@ export interface QueueRow {
   triage_level?: string;
   patient_label?: string;
   abha_id?: string | null;
+  phone?: string | null;
   summary?: IntakeSummary | null;
   source_tags?: { claim: string; source: string }[];
+  followup_answers?: { question: string; answer: string }[];
   prior_history?: {
     conditions: string[];
     medicines: string[];
@@ -179,6 +222,11 @@ export interface QueueRow {
   approved_by?: string | null;
   approved_at?: string | null;
   transcript?: string;
+  created_at?: string;
+  priority_score?: number;
+  score_breakdown?: ScoreBreakdown;
+  waiting_minutes?: number;
+  override_reason?: string;
 }
 
 export const staffQueue = () => api<{ queue: QueueRow[] }>('/staff/queue');
@@ -188,7 +236,8 @@ export const staffEntry = (id: string) => api<{ entry: QueueRow }>('/staff/entry
 export const staffApprove = (id: string, summary: IntakeSummary) =>
   api<{ ok: boolean; approved_by: string; approved_at: string }>('/staff/approve', { id, summary });
 
-export const staffOverride = (id: string, triage_level: string) => api<{ ok: boolean }>('/staff/override', { id, triage_level });
+export const staffOverride = (id: string, triage_level: string, reason: string) =>
+  api<{ ok: boolean }>('/staff/override', { id, triage_level, reason });
 
 export const staffReorder = (order: string[]) => api<{ ok: boolean }>('/staff/reorder', { order });
 
@@ -198,10 +247,31 @@ export const staffOcr = (id: string, imageBase64: string, mime: string) =>
 export const staffCapacity = (field: 'icu_beds_available' | 'ventilators_available', delta: number) =>
   api<{ ok: boolean; value: number }>('/staff/admin/capacity', { field, delta });
 
+export interface EmergencyCardRow {
+  id: string;
+  kind: string;
+  status: string;
+  patient_label: string;
+  created_at: string;
+  target_deadline_at: string | null;
+  current_target_hospital_id: string;
+  accepted_hospital_id: string | null;
+  emergency_types: string[];
+  eta_minutes: number;
+  summary?: IntakeSummary | null;
+  transcript?: string;
+  suggestion: 'CAN_ACCEPT' | 'CHECK_NEEDED';
+  suggestion_reasons: string[];
+}
+
 export interface AdminOverview {
   hospital: AdminHospital | null;
-  my_emergencies: Record<string, unknown>[];
+  my_emergencies: EmergencyCardRow[];
   other_emergencies_count: number;
+  held_beds_count: number;
+  recent_decisions: RecentDecision[];
+  beds: BedCategoryCount[];
+  resources: ResourceItem[];
   legs: Record<string, unknown>[];
 }
 
@@ -220,10 +290,19 @@ export interface AdminHospital {
 export const staffAdminOverview = () =>
   api<AdminOverview>('/staff/admin/overview');
 
-export const staffAudit = () =>
-  api<{ log: { id: string; ts: string; role: string; action: string; patient_ref: string; details: Record<string, unknown> | null }[] }>('/staff/audit');
+export const staffUpdateBed = (bed_type: 'ICU' | 'EMERGENCY' | 'MATERNITY' | 'GENERAL', delta: number) =>
+  api<{ ok: boolean; beds: BedCategoryCount[] }>('/staff/admin/beds', { bed_type, delta });
 
-export const emergencyRespond = (request_id: string, action: 'ACCEPT' | 'DECLINE', reason?: string) =>
+export const staffUpdateResource = (resource_id: string, status: ResourceAvailability) =>
+  api<{ ok: boolean; resources: ResourceItem[] }>('/staff/admin/resource-status', { resource_id, status });
+
+export const staffAudit = () =>
+  api<{ log: { id: string; ts: string; role: string; action: string; patient_ref: string; is_break_glass?: boolean; details: Record<string, unknown> | null }[] }>('/staff/audit');
+
+export const staffAuditLog = (action: string, patient_ref: string, details?: Record<string, unknown>, is_break_glass?: boolean) =>
+  api<{ ok: boolean }>('/staff/audit/log', { action, patient_ref, details, is_break_glass });
+
+export const emergencyRespond = (request_id: string, action: 'ACCEPT' | 'DECLINE', reason?: DeclineReason | string) =>
   api<{ ok: boolean; status: string }>('/emergency/respond', { request_id, action, reason });
 
 // ---------- ASV ----------

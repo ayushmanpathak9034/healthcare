@@ -2,7 +2,7 @@
 
 import { SESSION_TTL_HOURS, STAFF_SALT, sessionSecret } from "./config.ts";
 
-export type StaffRole = "DOCTOR" | "RECEPTION" | "ADMIN";
+export type StaffRole = "DOCTOR" | "RECEPTION" | "ADMIN" | "HOSPITAL_DESK";
 
 export interface SessionClaims {
   sub: string;
@@ -82,6 +82,9 @@ export async function requireRole(req: Request, roles: StaffRole[]): Promise<Ses
   if (!token) throw new AuthError("Missing session token", 401);
   const claims = await verifyToken(token);
   if (!claims) throw new AuthError("Invalid or expired session", 401);
-  if (!roles.includes(claims.role)) throw new AuthError("Insufficient role", 403);
+  const allowed = new Set<StaffRole>(roles);
+  if (roles.includes("ADMIN")) allowed.add("HOSPITAL_DESK");
+  if (roles.includes("HOSPITAL_DESK")) allowed.add("ADMIN");
+  if (!allowed.has(claims.role)) throw new AuthError("Insufficient role", 403);
   return claims;
 }

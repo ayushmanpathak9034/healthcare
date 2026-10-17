@@ -38,8 +38,8 @@ function clientIp(req: Request): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
 }
 
-async function logAudit(role: string, action: string, patientRef: string, details?: Record<string, unknown>) {
-  await supabase.from("audit_log").insert({ role, action, patient_ref: patientRef, details: details ?? null });
+async function logAudit(role: string, action: string, patientRef: string, details?: Record<string, unknown>, isBreakGlass = false) {
+  await supabase.from("audit_log").insert({ role, action, patient_ref: patientRef, details: details ?? null, is_break_glass: isBreakGlass });
 }
 
 // Realtime refresh broadcast — no patient data in payload.
@@ -95,6 +95,81 @@ const MOCK_OCR = {
 };
 
 // ---------- helpers ----------
+interface ScoreBreakdown {
+  urgency: number;
+  red_flag: number;
+  vulnerability: number;
+  waiting_minutes: number;
+  waiting_points: number;
+  total: number;
+  red_flag_reasons: string[];
+  vulnerability_reasons: string[];
+}
+
+function computeScoreBreakdown(
+  level: string,
+  transcript = "",
+  prior?: { conditions?: string[]; age?: number } | null,
+  createdAt?: string | number,
+): ScoreBreakdown {
+  const urgency = level === "EMERGENCY" ? 100 : level === "URGENT" ? 60 : 20;
+
+  // Red-flag contribution from symptoms
+  const redFlags: string[] = [];
+  const text = (transcript || "").toLowerCase();
+  if (text.includes("chest pain") || text.includes("seene") || text.includes("heart") || text.includes("दौरा")) {
+    redFlags.push("Chest pain / cardiac symptom (+15)");
+  }
+  if (text.includes("breathless") || text.includes("saans") || text.includes("choking") || text.includes("सांस")) {
+    redFlags.push("Respiratory distress / dyspnea (+15)");
+  }
+  if (text.includes("bleeding") || text.includes("khoon") || text.includes("खून")) {
+    redFlags.push("Active hemorrhage / bleeding (+10)");
+  }
+  if (text.includes("snake") || text.includes("saanp") || text.includes("साँप") || text.includes("सांप")) {
+    redFlags.push("Suspected envenomation (+20)");
+  }
+  if (text.includes("unconscious") || text.includes("behosh") || text.includes("faint") || text.includes("बेहोश")) {
+    redFlags.push("Altered consciousness / syncope (+20)");
+  }
+  const red_flag = Math.min(30, redFlags.length * 15);
+
+  // Vulnerability contribution from comorbidities or extreme age
+  const vulnReasons: string[] = [];
+  const conds = (prior?.conditions ?? []).map((c) => String(c).toLowerCase());
+  if (conds.some((c) => c.includes("diabetes") || c.includes("sugar"))) {
+    vulnReasons.push("Comorbid diabetes mellitus (+5)");
+  }
+  if (conds.some((c) => c.includes("hypertension") || c.includes("bp") || c.includes("pressure"))) {
+    vulnReasons.push("Comorbid hypertension (+5)");
+  }
+  if (conds.some((c) => c.includes("asthma") || c.includes("copd"))) {
+    vulnReasons.push("Pre-existing pulmonary disease (+5)");
+  }
+  if (prior?.age && (prior.age >= 60 || prior.age <= 5)) {
+    vulnReasons.push(`Age risk (${prior.age} yrs) (+10)`);
+  }
+  const vulnerability = Math.min(20, vulnReasons.length * 5);
+
+  // Waiting points: 1 pt per 2 minutes waiting, capped at 20
+  const createdMs = createdAt ? new Date(createdAt).getTime() : Date.now();
+  const waiting_minutes = Math.max(0, Math.floor((Date.now() - createdMs) / 60000));
+  const waiting_points = Math.min(20, Math.floor(waiting_minutes / 2));
+
+  const total = urgency + red_flag + vulnerability + waiting_points;
+
+  return {
+    urgency,
+    red_flag,
+    vulnerability,
+    waiting_minutes,
+    waiting_points,
+    total,
+    red_flag_reasons: redFlags,
+    vulnerability_reasons: vulnReasons,
+  };
+}
+
 interface Priority { base: number }
 function priorityFor(level: string): number {
   const p: Priority = { base: 20 };
@@ -154,8 +229,14 @@ async function runCascade(requestId: string) {
       .from("hospitals")
       .select("id, name, address, lat, lng")
       .eq("emergency_capable", true);
+    const { data: outList } = await supabase
+      .from("hospital_resources")
+      .select("hospital_id")
+      .eq("status", "OUT");
+    const outHospitals = new Set((outList ?? []).map((r: { hospital_id: string }) => r.hospital_id));
+
     const next = (candidates ?? [])
-      .filter((c: { id: string }) => !responded.has(c.id))
+      .filter((c: { id: string }) => !responded.has(c.id) && !outHospitals.has(c.id))
       .sort((a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
         const dl = current.lat != null && current.lng != null;
         const da = dl ? Math.hypot(a.lat - current.lat, a.lng - current.lng) : 0;
@@ -349,6 +430,8 @@ Deno.serve(async (req: Request) => {
       const v = validSummary(summaryObj);
       if (!v.ok) return bad(v.error!);
       const level = String(intakeObj.triage_level ?? triage_floor ?? "ROUTINE");
+      const finalLevel = priorityFor(level) === 100 ? "EMERGENCY" : level;
+      const breakdown = computeScoreBreakdown(finalLevel, transcript ?? "", prior_history as { conditions?: string[]; age?: number } | null, Date.now());
       const { data: entry, error: e } = await supabase
         .from("queue_entries")
         .insert({
@@ -357,15 +440,17 @@ Deno.serve(async (req: Request) => {
           phone: phone ?? null,
           language: language ?? "en-IN",
           transcript: transcript ?? "",
+          raw_transcript: transcript ?? "",
           followup_answers: followup_answers ?? [],
-          triage_level: priorityFor(level) === 100 ? "EMERGENCY" : level,
+          triage_level: finalLevel,
           triage_floor,
           summary: summaryObj,
           source_tags: (intakeObj.source_tags ?? []) as unknown as object,
           prior_history: prior_history ?? null,
           ocr_records: ocr_records ?? [],
           hospital_id,
-          priority_score: priorityFor(level),
+          priority_score: breakdown.total,
+          score_breakdown: breakdown as unknown as object,
           status: "SENT_TO_DOCTOR",
         })
         .select()
@@ -400,7 +485,13 @@ Deno.serve(async (req: Request) => {
       if (!["AMBULANCE", "ABHA_FAMILY"].includes(kind)) return bad("kind must be AMBULANCE or ABHA_FAMILY");
       const { data: candidates } = await supabase.from("hospitals").select("id, name, address, lat, lng").eq("emergency_capable", true);
       if (!candidates?.length) return bad("No emergency-capable hospitals configured", 500);
-      const ordered = [...candidates].sort((a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
+
+      const { data: outList } = await supabase.from("hospital_resources").select("hospital_id").eq("status", "OUT");
+      const outHospitals = new Set((outList ?? []).map((r: { hospital_id: string }) => r.hospital_id));
+      const availableCandidates = candidates.filter((c: { id: string }) => !outHospitals.has(c.id));
+      const pool = availableCandidates.length ? availableCandidates : candidates;
+
+      const ordered = [...pool].sort((a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
         if (lat == null || lng == null) return 0;
         return Math.hypot(a.lat - lat, a.lng - lng) - Math.hypot(b.lat - lat, b.lng - lng);
       });
@@ -516,62 +607,136 @@ Deno.serve(async (req: Request) => {
     }
 
     if (path === "/staff/queue") {
-      const claims = await requireRole(req, ["DOCTOR", "RECEPTION", "ADMIN"]);
-      const { data, error } = await supabase.from("queue_entries").select("*");
+      const claims = await requireRole(req, ["DOCTOR", "RECEPTION", "ADMIN", "HOSPITAL_DESK"]);
+      let query = supabase.from("queue_entries").select("*");
+      if (claims.hospital_id) {
+        query = query.eq("hospital_id", claims.hospital_id);
+      }
+      const { data, error } = await query;
       if (error) return bad(error.message, 500);
-      const sorted = [...(data ?? [])].sort((a, b) => {
-        if (a.manual_rank != null && b.manual_rank != null) return a.manual_rank - b.manual_rank;
-        if (a.manual_rank != null) return -1;
-        if (b.manual_rank != null) return 1;
-        const pa = priorityFor(a.triage_level) + Math.min(20, (Date.now() - new Date(a.created_at).getTime()) / 120000);
-        const pb = priorityFor(b.triage_level) + Math.min(20, (Date.now() - new Date(b.created_at).getTime()) / 120000);
-        return pb - pa;
-      }).map((e, i) => ({ ...e, position: i + 1 }));
+
+      const sorted = [...(data ?? [])]
+        .map((e) => {
+          const bd = computeScoreBreakdown(e.triage_level, e.transcript, e.prior_history, e.created_at);
+          return {
+            ...e,
+            priority_score: bd.total,
+            score_breakdown: bd,
+            waiting_minutes: bd.waiting_minutes,
+          };
+        })
+        .sort((a, b) => {
+          if (a.manual_rank != null && b.manual_rank != null) return a.manual_rank - b.manual_rank;
+          if (a.manual_rank != null) return -1;
+          if (b.manual_rank != null) return 1;
+          return b.priority_score - a.priority_score;
+        })
+        .map((e, i) => ({ ...e, position: i + 1 }));
+
       let filtered = sorted;
       if (claims.role === "RECEPTION") {
-        filtered = sorted.map((e) => ({ id: e.id, token: e.token, status: e.status, position: e.position, manual_rank: e.manual_rank, triage_level: e.triage_level }));
-      } else if (claims.role === "ADMIN") {
-        filtered = sorted.map((e) => ({ id: e.id, token: e.token, status: e.status, triage_level: e.triage_level }));
+        filtered = sorted.map((e) => ({
+          id: e.id,
+          token: e.token,
+          status: e.status,
+          position: e.position,
+          manual_rank: e.manual_rank,
+          triage_level: e.triage_level,
+          priority_score: e.priority_score,
+          waiting_minutes: e.waiting_minutes,
+          created_at: e.created_at,
+        }));
+      } else if (claims.role === "ADMIN" || claims.role === "HOSPITAL_DESK") {
+        filtered = sorted.map((e) => ({
+          id: e.id,
+          token: e.token,
+          status: e.status,
+          position: e.position,
+          triage_level: e.triage_level,
+          priority_score: e.priority_score,
+          created_at: e.created_at,
+        }));
       }
       return json({ queue: filtered });
     }
 
     if (path === "/staff/entry") {
-      await requireRole(req, ["DOCTOR"]);
+      const claims = await requireRole(req, ["DOCTOR"]);
       const { data: entry } = await supabase.from("queue_entries").select("*").eq("id", body.id).maybeSingle();
       if (!entry) return bad("Not found", 404);
-      await logAudit("DOCTOR", "VIEW_ENTRY", entry.id);
-      return json({ entry });
+      if (claims.hospital_id && entry.hospital_id && entry.hospital_id !== claims.hospital_id) {
+        return bad("Unauthorized: Patient belongs to another hospital", 403);
+      }
+      const bd = computeScoreBreakdown(entry.triage_level, entry.transcript, entry.prior_history, entry.created_at);
+      await logAudit("DOCTOR", "VIEW_ENTRY", entry.id, { token: entry.token });
+      return json({
+        entry: {
+          ...entry,
+          priority_score: bd.total,
+          score_breakdown: bd,
+          waiting_minutes: bd.waiting_minutes,
+        },
+      });
     }
 
     if (path === "/staff/approve") {
-      await requireRole(req, ["DOCTOR"]);
+      const claims = await requireRole(req, ["DOCTOR"]);
+      const { data: entry } = await supabase.from("queue_entries").select("*").eq("id", body.id).maybeSingle();
+      if (!entry) return bad("Not found", 404);
+      if (claims.hospital_id && entry.hospital_id && entry.hospital_id !== claims.hospital_id) {
+        return bad("Unauthorized: Cannot approve report belonging to another hospital", 403);
+      }
       const summary = body.summary;
       const v = validSummary(summary);
       if (!v.ok) return bad(v.error!);
       const { error } = await supabase
         .from("queue_entries")
-        .update({ approved_by: claims.display_name, approved_at: new Date().toISOString(), approved_summary: summary, status: "APPROVED" })
+        .update({
+          approved_by: claims.display_name,
+          approved_at: new Date().toISOString(),
+          approved_summary: summary,
+          status: "APPROVED",
+        })
         .eq("id", body.id);
       if (error) return bad(error.message, 500);
-      await logAudit("DOCTOR", "APPROVE", body.id);
+      await logAudit("DOCTOR", "APPROVE", body.id, { token: entry.token, approved_by: claims.display_name });
       await broadcastRefresh("queue");
       return json({ ok: true, approved_by: claims.display_name, approved_at: new Date().toISOString() });
     }
 
     if (path === "/staff/override") {
-      await requireRole(req, ["DOCTOR"]);
-      const level = body.triage_level;
-      if (!["ROUTINE", "URGENT", "EMERGENCY"].includes(level)) return bad("Invalid triage level");
-      const { data: before } = await supabase.from("queue_entries").select("triage_level").eq("id", body.id).maybeSingle();
+      const claims = await requireRole(req, ["DOCTOR"]);
+      const { id, triage_level, reason } = body;
+      if (!reason || typeof reason !== "string" || !reason.trim()) {
+        return bad("Priority override requires a mandatory reason", 400);
+      }
+      if (!["ROUTINE", "URGENT", "EMERGENCY"].includes(triage_level)) {
+        return bad("Invalid triage level", 400);
+      }
+      const { data: before } = await supabase.from("queue_entries").select("*").eq("id", id).maybeSingle();
+      if (!before) return bad("Not found", 404);
+      if (claims.hospital_id && before.hospital_id && before.hospital_id !== claims.hospital_id) {
+        return bad("Unauthorized: Cannot override patient of another hospital", 403);
+      }
+      const bd = computeScoreBreakdown(triage_level, before.transcript, before.prior_history, before.created_at);
       const { error } = await supabase
         .from("queue_entries")
-        .update({ triage_level: level, priority_score: priorityFor(level) })
-        .eq("id", body.id);
+        .update({
+          triage_level,
+          priority_score: bd.total,
+          score_breakdown: bd as unknown as object,
+          override_reason: reason.trim(),
+        })
+        .eq("id", id);
       if (error) return bad(error.message, 500);
-      await logAudit("DOCTOR", "OVERRIDE_PRIORITY", body.id, { from: before?.triage_level, to: level });
+      await logAudit("DOCTOR", "OVERRIDE_PRIORITY", id, {
+        token: before.token,
+        from: before.triage_level,
+        to: triage_level,
+        reason: reason.trim(),
+      });
       await broadcastRefresh("queue");
-      return json({ ok: true });
+      return json({ ok: true, triage_level, priority_score: bd.total, score_breakdown: bd });
     }
 
     if (path === "/staff/reorder") {
@@ -607,41 +772,89 @@ Deno.serve(async (req: Request) => {
     }
 
     if (path === "/emergency/respond") {
-      const claims = await requireRole(req, ["ADMIN"]);
-      if (!claims.hospital_id) return bad("Admin has no hospital linked", 403);
+      const claims = await requireRole(req, ["ADMIN", "HOSPITAL_DESK"]);
+      if (!claims.hospital_id) return bad("Staff member has no hospital linked", 403);
       const { request_id, action, reason } = body;
+      if (!["ACCEPT", "DECLINE"].includes(action)) return bad("action must be ACCEPT or DECLINE", 400);
+
       const { data: reqRow } = await supabase.from("emergency_requests").select("*").eq("id", request_id).maybeSingle();
       if (!reqRow) return bad("Not found", 404);
-      await runCascade(request_id);      const { data: fresh } = await supabase.from("emergency_requests").select("status, current_target_hospital_id, responses").eq("id", request_id).maybeSingle();
-      if (!fresh || fresh.status !== "BROADCASTING") return bad("Request already resolved", 409);
+      await runCascade(request_id);
+
+      const { data: fresh } = await supabase
+        .from("emergency_requests")
+        .select("status, current_target_hospital_id, responses, emergency_types")
+        .eq("id", request_id)
+        .maybeSingle();
+
+      if (!fresh || fresh.status !== "BROADCASTING") return bad("Request already resolved or cancelled", 409);
       if (fresh.current_target_hospital_id !== claims.hospital_id) return bad("Your hospital is not the current target", 403);
+
       if (action === "ACCEPT") {
-        const { data: hospital } = await supabase.from("hospitals").select("name").eq("id", claims.hospital_id).maybeSingle();
         const responses = [...(fresh.responses ?? []), { hospital_id: claims.hospital_id, action: "ACCEPT", at: new Date().toISOString() }];
-        const { error: e } = await supabase
+        // Atomic conditional update to prevent concurrent double-acceptance
+        const { data: won, error: e } = await supabase
           .from("emergency_requests")
           .update({ status: "ACCEPTED", accepted_hospital_id: claims.hospital_id, responses })
           .eq("id", request_id)
           .eq("status", "BROADCASTING")
-          .eq("current_target_hospital_id", claims.hospital_id);
-        if (e) return bad(e.message, 500);
-        await logAudit("ADMIN", "EMERGENCY_ACCEPT", request_id, { hospital: hospital?.name });
+          .eq("current_target_hospital_id", claims.hospital_id)
+          .select()
+          .maybeSingle();
+
+        if (e || !won) return bad("Acceptance conflict: another hospital already accepted", 409);
+
+        // Reserve bed in hospital_beds
+        const { data: bedRow } = await supabase
+          .from("hospital_beds")
+          .select("id, available, held")
+          .eq("hospital_id", claims.hospital_id)
+          .eq("type", "ICU")
+          .maybeSingle();
+
+        if (bedRow) {
+          await supabase.from("hospital_beds").update({
+            available: Math.max(0, bedRow.available - 1),
+            held: (bedRow.held ?? 0) + 1,
+            updated_at: new Date().toISOString(),
+          }).eq("id", bedRow.id);
+        }
+
+        const { data: hospital } = await supabase.from("hospitals").select("name").eq("id", claims.hospital_id).maybeSingle();
+        await logAudit(claims.role, "EMERGENCY_ACCEPT", request_id, { hospital: hospital?.name });
         await broadcastRefresh("emergency");
         return json({ ok: true, status: "ACCEPTED" });
       }
+
       if (action === "DECLINE") {
-        const responses = [...(fresh.responses ?? []), { hospital_id: claims.hospital_id, action: "DECLINE", reason, at: new Date().toISOString() }];
-        await supabase.from("emergency_requests").update({ responses }).eq("id", request_id);
-        await logAudit("ADMIN", "EMERGENCY_DECLINE", request_id, { reason });
+        const VALID_DECLINE = ["no bed", "no specialist", "no equipment", "other"];
+        const cleanReason = String(reason || "").trim().toLowerCase();
+        const isValid = VALID_DECLINE.some((r) => cleanReason.startsWith(r));
+        if (!isValid) {
+          return bad(`Decline reason must begin with one of: ${VALID_DECLINE.join(", ")}`, 400);
+        }
+
+        const responses = [...(fresh.responses ?? []), {
+          hospital_id: claims.hospital_id,
+          action: "DECLINE",
+          reason: reason || "no bed",
+          at: new Date().toISOString(),
+        }];
+
+        await supabase.from("emergency_requests").update({
+          responses,
+          decline_reason: reason || "no bed",
+        }).eq("id", request_id);
+
+        await logAudit(claims.role, "EMERGENCY_DECLINE", request_id, { reason });
         await runCascade(request_id);
         await broadcastRefresh("emergency");
         return json({ ok: true, status: "BROADCASTING" });
       }
-      return bad("action must be ACCEPT or DECLINE");
     }
 
     if (path === "/staff/admin/capacity") {
-      const claims = await requireRole(req, ["ADMIN"]);
+      const claims = await requireRole(req, ["ADMIN", "HOSPITAL_DESK"]);
       if (!claims.hospital_id) return bad("Admin has no hospital linked", 403);
       const { field, delta } = body;
       if (!["icu_beds_available", "ventilators_available"].includes(field)) return bad("Invalid field");
@@ -649,35 +862,197 @@ Deno.serve(async (req: Request) => {
       if (!h) return bad("Hospital not found", 404);
       const next = Math.max(0, (h[field] as number) + (Number(delta) || 0));
       await supabase.from("hospitals").update({ [field]: next }).eq("id", claims.hospital_id);
-      await logAudit("ADMIN", "CAPACITY_CHANGE", claims.hospital_id, { field, delta, new_value: next });
+      await logAudit(claims.role, "CAPACITY_CHANGE", claims.hospital_id, { field, delta, new_value: next });
       await broadcastRefresh("queue");
       return json({ ok: true, value: next });
     }
 
+    if (path === "/staff/admin/beds") {
+      const claims = await requireRole(req, ["ADMIN", "HOSPITAL_DESK"]);
+      if (!claims.hospital_id) return bad("Staff member has no hospital linked", 403);
+      const { bed_type, delta } = body;
+      if (!["ICU", "EMERGENCY", "MATERNITY", "GENERAL"].includes(bed_type)) {
+        return bad("Invalid bed_type (must be ICU, EMERGENCY, MATERNITY, or GENERAL)", 400);
+      }
+      const numDelta = Number(delta);
+      if (!Number.isFinite(numDelta)) return bad("Invalid delta number", 400);
+
+      const { data: cur } = await supabase
+        .from("hospital_beds")
+        .select("*")
+        .eq("hospital_id", claims.hospital_id)
+        .eq("type", bed_type)
+        .maybeSingle();
+
+      const curAvail = cur?.available ?? (bed_type === "ICU" ? 5 : 10);
+      const curTotal = cur?.total ?? 20;
+      const nextAvail = Math.max(0, curAvail + numDelta);
+
+      const { error: e } = await supabase
+        .from("hospital_beds")
+        .upsert({
+          hospital_id: claims.hospital_id,
+          type: bed_type,
+          available: nextAvail,
+          total: Math.max(nextAvail, curTotal),
+          held: cur?.held ?? 0,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "hospital_id,type" });
+
+      if (e) return bad(e.message, 500);
+
+      if (bed_type === "ICU") {
+        await supabase.from("hospitals").update({ icu_beds_available: nextAvail }).eq("id", claims.hospital_id);
+      }
+
+      const { data: allBeds } = await supabase
+        .from("hospital_beds")
+        .select("*")
+        .eq("hospital_id", claims.hospital_id);
+
+      await logAudit(claims.role, "UPDATE_BED_INVENTORY", claims.hospital_id, { bed_type, delta: numDelta, next_available: nextAvail });
+      await broadcastRefresh("emergency");
+      return json({ ok: true, beds: allBeds ?? [] });
+    }
+
+    if (path === "/staff/admin/resource-status") {
+      const claims = await requireRole(req, ["ADMIN", "HOSPITAL_DESK"]);
+      if (!claims.hospital_id) return bad("Staff member has no hospital linked", 403);
+      const { resource_id, status } = body;
+      if (!["AVAILABLE", "LOW", "OUT"].includes(status)) {
+        return bad("Status must be AVAILABLE, LOW, or OUT", 400);
+      }
+      const { error: e } = await supabase
+        .from("hospital_resources")
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq("id", resource_id)
+        .eq("hospital_id", claims.hospital_id);
+
+      if (e) return bad(e.message, 500);
+
+      const { data: allResources } = await supabase
+        .from("hospital_resources")
+        .select("*")
+        .eq("hospital_id", claims.hospital_id);
+
+      await logAudit(claims.role, "UPDATE_RESOURCE_STATUS", claims.hospital_id, { resource_id, status });
+      await broadcastRefresh("emergency");
+      return json({ ok: true, resources: allResources ?? [] });
+    }
+
     if (path === "/staff/admin/overview") {
-      const claims = await requireRole(req, ["ADMIN"]);
-      if (!claims.hospital_id) return bad("Admin has no hospital linked", 403);
+      const claims = await requireRole(req, ["ADMIN", "HOSPITAL_DESK"]);
+      if (!claims.hospital_id) return bad("Staff member has no hospital linked", 403);
       await runCascadeAll();
+
       const { data: hospital } = await supabase
         .from("hospitals")
         .select("id, name, city, area, icu_beds_available, ventilators_available, emergency_capable, queue_length, specialties, lat, lng, raw")
         .eq("id", claims.hospital_id)
         .maybeSingle();
+
+      const { data: bedsData } = await supabase
+        .from("hospital_beds")
+        .select("*")
+        .eq("hospital_id", claims.hospital_id);
+
+      const beds = (bedsData && bedsData.length > 0) ? bedsData : [
+        { id: "b1", hospital_id: claims.hospital_id, type: "ICU", available: hospital?.icu_beds_available ?? 5, total: 20, held: 0, updated_at: new Date().toISOString() },
+        { id: "b2", hospital_id: claims.hospital_id, type: "EMERGENCY", available: 12, total: 25, held: 0, updated_at: new Date().toISOString() },
+        { id: "b3", hospital_id: claims.hospital_id, type: "MATERNITY", available: 6, total: 15, held: 0, updated_at: new Date().toISOString() },
+        { id: "b4", hospital_id: claims.hospital_id, type: "GENERAL", available: 35, total: 80, held: 0, updated_at: new Date().toISOString() },
+      ];
+
+      const { data: resourcesData } = await supabase
+        .from("hospital_resources")
+        .select("*")
+        .eq("hospital_id", claims.hospital_id);
+
+      const resources = resourcesData ?? [];
+
       const { data: reqs } = await supabase
         .from("emergency_requests")
-        .select("id, kind, status, current_target_hospital_id, target_deadline_at, accepted_hospital_id, emergency_summary, created_at")
+        .select("id, kind, status, patient_label, current_target_hospital_id, target_deadline_at, accepted_hospital_id, emergency_summary, responses, created_at, answers")
         .order("created_at", { ascending: false })
-        .limit(20);
+        .limit(30);
+
       const { data: legs } = await supabase
         .from("transfer_legs")
         .select("*, transfer_requests(patient_ref, vials_needed, status)")
         .eq("source_hospital_id", claims.hospital_id)
         .order("created_at", { ascending: false })
         .limit(20);
+
       const mine = (reqs ?? []).filter((r) => r.current_target_hospital_id === claims.hospital_id || r.accepted_hospital_id === claims.hospital_id);
       const others = (reqs ?? []).filter((r) => r.current_target_hospital_id !== claims.hospital_id && r.accepted_hospital_id !== claims.hospital_id);
+
+      const heldBedsCount = (reqs ?? []).filter((r) => r.accepted_hospital_id === claims.hospital_id && r.status === "ACCEPTED").length;
+
+      // Deterministic suggestions and emergency cards enrichment
+      const enrichedMine = mine.map((r) => {
+        const suggestionReasons: string[] = [];
+        let canAccept = true;
+
+        // Bed availability check
+        const icu = beds.find((b: { type: string }) => b.type === "ICU");
+        if (icu && icu.available <= 0) {
+          canAccept = false;
+          suggestionReasons.push("No ICU beds currently available");
+        } else if (icu) {
+          suggestionReasons.push(`ICU beds available: ${icu.available}`);
+        }
+
+        // Resource availability & staleness check
+        for (const res of resources) {
+          const ageMin = Math.floor((Date.now() - new Date(res.updated_at).getTime()) / 60000);
+          if (res.status === "OUT") {
+            canAccept = false;
+            suggestionReasons.push(`Resource ${res.name} is OUT`);
+          } else if (ageMin > 60) {
+            suggestionReasons.push(`Resource ${res.name} updated > 60m ago — Call to confirm`);
+          }
+        }
+
+        const summary = r.emergency_summary?.summary ?? null;
+
+        return {
+          id: r.id,
+          kind: r.kind,
+          status: r.status,
+          patient_label: r.patient_label || `Emergency #${r.id.slice(0, 6)}`,
+          created_at: r.created_at,
+          target_deadline_at: r.target_deadline_at,
+          current_target_hospital_id: r.current_target_hospital_id,
+          accepted_hospital_id: r.accepted_hospital_id,
+          emergency_types: ["Emergency", "Trauma / Acute"],
+          eta_minutes: 8,
+          summary,
+          transcript: summary?.chief_complaint ?? "",
+          suggestion: canAccept ? ("CAN_ACCEPT" as const) : ("CHECK_NEEDED" as const),
+          suggestion_reasons: suggestionReasons,
+        };
+      });
+
+      // Recent desk decisions
+      const recentDecisions = [];
+      for (const r of reqs ?? []) {
+        for (const resp of (r.responses ?? [])) {
+          if (resp.hospital_id === claims.hospital_id) {
+            recentDecisions.push({
+              id: `${r.id}-${resp.at}`,
+              request_id: r.id,
+              patient_label: r.patient_label || `Emergency #${r.id.slice(0, 6)}`,
+              decision: resp.action === "ACCEPT" ? ("ACCEPTED" as const) : ("DECLINED" as const),
+              reason: resp.reason || (resp.action === "ACCEPT" ? "Bed allocated" : "No capacity"),
+              timestamp: resp.at,
+            });
+          }
+        }
+      }
+
       const h = hospital ?? {};
       const raw = (h.raw as { specialists_on_duty?: string[]; blood_stock?: Record<string, number> } | null) ?? {};
+
       return json({
         hospital: {
           id: h.id,
@@ -690,16 +1065,27 @@ Deno.serve(async (req: Request) => {
           specialists_on_duty: raw.specialists_on_duty ?? [],
           blood_stock: raw.blood_stock ?? {},
         },
-        my_emergencies: mine,
+        my_emergencies: enrichedMine,
         other_emergencies_count: others.length,
+        held_beds_count: heldBedsCount,
+        beds,
+        resources,
+        recent_decisions: recentDecisions.slice(0, 10),
         legs: legs ?? [],
       });
     }
 
     if (path === "/staff/audit") {
-      await requireRole(req, ["DOCTOR", "ADMIN"]);
+      await requireRole(req, ["DOCTOR", "ADMIN", "HOSPITAL_DESK"]);
       const { data } = await supabase.from("audit_log").select("*").order("ts", { ascending: false }).limit(50);
       return json({ log: data ?? [] });
+    }
+
+    if (path === "/staff/audit/log") {
+      const claims = await requireRole(req, ["DOCTOR", "ADMIN", "HOSPITAL_DESK", "RECEPTION"]);
+      const { action, patient_ref, details, is_break_glass } = body;
+      await logAudit(claims.role, action || "AUDIT_EVENT", patient_ref || "", details, Boolean(is_break_glass));
+      return json({ ok: true });
     }
 
     // ---------- ASV ----------
