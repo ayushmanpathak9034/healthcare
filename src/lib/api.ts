@@ -18,20 +18,28 @@ export function clearStaffToken() {
   sessionStorage.removeItem(TOKEN_KEY);
 }
 
-export async function api<T = Record<string, unknown>>(path: string, body: Record<string, unknown> = {}): Promise<T> {
-  // Staff token takes the Authorization header; public routes fall back to the anon key.
+export async function api<T = Record<string, unknown>>(
+  path: string,
+  body: Record<string, unknown> = {},
+  method: 'POST' | 'GET' | 'PATCH' = 'POST'
+): Promise<T> {
   const token = getStaffToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${token ?? anonKey}`,
+    Authorization: `Bearer ${token ?? anonKey ?? 'demo-token'}`,
   };
-  const res = await fetch(`${url}/functions/v1/api${path}`, {
-    method: 'POST',
+  const target = path.startsWith('/api') ? path : `/api${path}`;
+  const res = await fetch(target, {
+    method,
     headers,
-    body: JSON.stringify(body),
+    body: method === 'GET' ? undefined : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((data as { error?: string }).error ?? `Request failed (${res.status})`);
+  if (!res.ok) {
+    const err = (data as { error?: { message?: string } | string })?.error;
+    const msg = typeof err === 'object' && err !== null ? err.message : err;
+    throw new Error(msg ?? `Request failed (${res.status})`);
+  }
   return data as T;
 }
 
@@ -92,6 +100,7 @@ export const hospitalsList = () => api<{ hospitals: Hospital[] }>('/hospitals/li
 export interface QueueSubmitResult {
   token: string;
   entry_id: string;
+  status_token?: string;
   position: number;
   estimated_wait_minutes: number;
 }
@@ -117,7 +126,8 @@ export interface QueueStatusResult {
   triage_level: string;
 }
 
-export const queueStatus = (entry_id: string) => api<QueueStatusResult>('/queue/status', { entry_id });
+export const queueStatus = (entry_id: string, status_token?: string) =>
+  api<QueueStatusResult>('/queue/status', { entry_id, status_token });
 
 export interface EmergencyCreateResult {
   request_id: string;
@@ -304,3 +314,113 @@ export interface OcrRecord {
   header?: string;
   warnings?: string[];
 }
+
+// ---------- Stage 1 & 2 additions ----------
+export interface ScoreBreakdown {
+  base: number;
+  moderate_red_flag: number;
+  age_risk: number;
+  pregnancy: number;
+  chronic_condition: number;
+  wait_time: number;
+}
+
+export interface DoctorQueueEntry {
+  id: string;
+  entry_id: string;
+  token: string;
+  hospital_id: string;
+  colour: 'GREEN' | 'YELLOW' | 'RED';
+  triage_level: string;
+  patient_label: string;
+  abha_id: string | null;
+  score: number;
+  breakdown: ScoreBreakdown;
+  tags: string[];
+  review_flags: string[];
+  summary: IntakeSummary;
+  draft_summary: IntakeSummary;
+  transcript: string;
+  answers: { question: string; answer: string }[];
+  status: string;
+  position: number;
+  doctor_override?: {
+    original_colour: string;
+    new_colour: string;
+    reason: string;
+    overridden_at: string;
+  };
+  approved_by?: string;
+  approved_at?: string;
+}
+
+export interface DeskEmergencyCard {
+  request_id: string;
+  emergency_types: string[];
+  distance_km: number;
+  eta_min: number;
+  summary: {
+    chief_complaint: string;
+    duration?: string;
+    severity?: number;
+    relevant_history?: string[];
+  };
+  transcript: string;
+  answers: { question: string; answer: string }[];
+  my_status: 'pending' | 'accepted' | 'declined' | 'cancelled';
+  overall_status: 'broadcasting' | 'accepted' | 'fallback';
+  suggestion: 'can_accept' | 'check_needed';
+  suggestion_reasons: string[];
+  created_at: number;
+}
+
+export const verifyOtp = (phone: string, otp: string) =>
+  api<{ ok: boolean; verified: boolean }>('/otp/verify', { phone, otp });
+
+export const doctorQueue = (hospital_id?: string) =>
+  api<{ queue: DoctorQueueEntry[]; entries: DoctorQueueEntry[] }>(
+    `/doctor/queue${hospital_id ? `?hospital_id=${hospital_id}` : ''}`,
+    {},
+    'GET'
+  );
+
+export const doctorOverride = (entry_id: string, new_colour: string, reason: string) =>
+  api<{ ok: boolean }>('/doctor/override', { entry_id, new_colour, reason });
+
+export const doctorApprove = (entry_id: string, edited_summary: IntakeSummary) =>
+  api<{ ok: boolean; approved_by: string; approved_at: string }>('/doctor/approve', {
+    entry_id,
+    edited_summary,
+  });
+
+export const deskIncoming = (hospital_id?: string) =>
+  api<{ incoming: DeskEmergencyCard[] }>(
+    `/desk/incoming${hospital_id ? `?hospital_id=${hospital_id}` : ''}`,
+    {},
+    'GET'
+  );
+
+export const deskRespond = (
+  request_id: string,
+  hospital_id: string,
+  action: 'accept' | 'decline',
+  reason?: string
+) => api<{ ok: boolean; status: string }>('/desk/respond', { request_id, hospital_id, action, reason });
+
+export const updateHospitalResource = (
+  hospital_id: string,
+  resource: string,
+  status: 'available' | 'low' | 'out'
+) => api<{ ok: boolean; resource: unknown }>('/hospital/resources', { hospital_id, resource, status }, 'PATCH');
+
+export const updateHospitalBeds = (
+  hospital_id: string,
+  bed_type: 'icu' | 'general' | 'ot',
+  available: number
+) => api<{ ok: boolean; beds: unknown }>('/hospital/beds', { hospital_id, bed_type, available }, 'PATCH');
+
+export const demoReset = () => api<{ ok: boolean; message: string }>('/demo/reset');
+
+export const demoFlip = (hospital_id: string, resource: string, status: string) =>
+  api<{ ok: boolean }>('/demo/flip', { hospital_id, resource, status });
+
