@@ -1,0 +1,298 @@
+[
+  {
+    "type": "snakebite",
+    "default_colour": "red",
+    "keywords": [
+      "snake bite",
+      "snakebite",
+      "bitten by snake",
+      "saanp ne kaata",
+      "saanp ne kata",
+      "सांप ने काटा",
+      "साँप ने काटा",
+      "सांप काट"
+    ],
+    "required_resources": [
+      "asv"
+    ],
+    "required_beds": [
+      "icu"
+    ],
+    "required_capabilities": [
+      "toxicology"
+    ],
+    "required_equipment": [
+      "ventilators"
+    ]
+  },
+  {
+    "type": "cardiac_chest_pain",
+    "default_colour": "red",
+    "keywords": [
+      "chest pain",
+      "pain in chest",
+      "heart attack",
+      "seene mein dard",
+      "seene me dard",
+      "सीने में दर्द",
+      "छाती में दर्द",
+      "दिल का दौरा"
+    ],
+    "required_resources": [
+      "thrombolysis"
+    ],
+    "required_beds": [
+      "icu"
+    ],
+    "required_capabilities": [
+      "cardiology"
+    ],
+    "required_equipment": [
+      "cardiac_monitor",
+      "defibrillator"
+    ],
+    "any_of": [
+      [
+        "thrombolysis_in_stock",
+        "cath_lab"
+      ]
+    ]
+  },
+  {
+    "type": "fast_heart_rate",
+    "default_colour": "yellow",
+    "escalate_to_red_if": [
+      "chest pain",
+      "fainting",
+      "breathless",
+      "behosh",
+      "saans"
+    ],
+    "keywords": [
+      "heart racing",
+      "palpitations",
+      "heart beating fast",
+      "dil tez dhadak",
+      "dil tez dhadak raha",
+      "दिल तेज़ धड़क",
+      "दिल तेज धड़क रहा",
+      "धड़कन तेज़"
+    ],
+    "required_resources": [
+      "rate_control_drugs"
+    ],
+    "required_beds": [
+      "icu"
+    ],
+    "required_capabilities": [
+      "cardiology"
+    ],
+    "required_equipment": [
+      "cardiac_monitor",
+      "defibrillator"
+    ]
+  },
+  {
+    "type": "stroke",
+    "default_colour": "red",
+    "keywords": [
+      "face drooping",
+      "slurred speech",
+      "arm weakness",
+      "stroke",
+      "chehra tedha",
+      "bolne mein dikkat",
+      "चेहरा टेढ़ा",
+      "बोलने में दिक्कत",
+      "हाथ में कमजोरी"
+    ],
+    "required_resources": [],
+    "required_beds": [
+      "icu"
+    ],
+    "required_capabilities": [
+      "neurology"
+    ],
+    "required_equipment": [
+      "ct_scan"
+    ]
+  },
+  {
+    "type": "trauma_bleeding",
+    "default_colour": "red",
+    "keywords": [
+      "heavy bleeding",
+      "accident",
+      "severe injury",
+      "khoon beh raha",
+      "bahut khoon",
+      "एक्सीडेंट",
+      "बहुत खून बह रहा",
+      "खून बह रहा"
+    ],
+    "required_resources": [],
+    "required_beds": [
+      "emergency"
+    ],
+    "required_capabilities": [
+      "trauma"
+    ],
+    "required_equipment": [
+      "operation_theatres",
+      "blood_bank_onsite"
+    ],
+    "needs_blood_group": true
+  },
+  {
+    "type": "pregnancy_emergency",
+    "default_colour": "red",
+    "keywords": [
+      "pregnant bleeding",
+      "labour pain",
+      "delivery pain",
+      "pregnancy emergency",
+      "garbhavati khoon",
+      "प्रसव पीड़ा",
+      "गर्भावस्था में खून"
+    ],
+    "required_resources": [],
+    "required_beds": [
+      "maternity"
+    ],
+    "required_capabilities": [
+      "obstetrics"
+    ],
+    "required_equipment": [
+      "operation_theatres",
+      "blood_bank_onsite"
+    ],
+    "needs_blood_group": true
+  },
+  {
+    "type": "poisoning",
+    "default_colour": "red",
+    "keywords": [
+      "poison",
+      "swallowed pesticide",
+      "overdose",
+      "zeher",
+      "zehar kha liya",
+      "जहर",
+      "जहर खा लिया",
+      "ज़हर"
+    ],
+    "required_resources": [],
+    "required_beds": [
+      "icu"
+    ],
+    "required_capabilities": [
+      "toxicology"
+    ],
+    "required_equipment": [
+      "ventilators"
+    ]
+  },
+  {
+    "type": "dog_bite",
+    "default_colour": "yellow",
+    "keywords": [
+      "dog bite",
+      "bitten by dog",
+      "kutte ne kaata",
+      "kutte ne kata",
+      "कुत्ते ने काटा",
+      "कुत्ता काट"
+    ],
+    "required_resources": [
+      "anti_rabies"
+    ],
+    "required_beds": [],
+    "required_capabilities": [],
+    "required_equipment": []
+  },
+  {
+    "type": "asthma_allergy",
+    "default_colour": "yellow",
+    "escalate_to_red_if": [
+      "cannot breathe",
+      "saans nahi",
+      "swelling face",
+      "throat swelling",
+      "सांस नहीं"
+    ],
+    "keywords": [
+      "asthma attack",
+      "allergic reaction",
+      "wheezing",
+      "dama",
+      "saans phool",
+      "दमा",
+      "दम फूल रहा",
+      "एलर्जी",
+      "सांस फूल रही"
+    ],
+    "required_resources": [
+      "adrenaline",
+      "oxygen_cylinders"
+    ],
+    "required_beds": [
+      "emergency"
+    ],
+    "required_capabilities": [
+      "pulmonology"
+    ],
+    "required_equipment": [
+      "oxygen_supply"
+    ]
+  },
+  {
+    "type": "breathing_difficulty",
+    "default_colour": "red",
+    "keywords": [
+      "difficulty breathing",
+      "cannot breathe",
+      "saans lene mein takleef",
+      "saans nahi aa rahi",
+      "सांस लेने में तकलीफ",
+      "सांस नहीं आ रही"
+    ],
+    "required_resources": [
+      "oxygen_cylinders"
+    ],
+    "required_beds": [
+      "icu"
+    ],
+    "required_capabilities": [
+      "pulmonology"
+    ],
+    "required_equipment": [
+      "oxygen_supply",
+      "ventilators"
+    ]
+  },
+  {
+    "type": "unconscious_seizure",
+    "default_colour": "red",
+    "keywords": [
+      "unconscious",
+      "fainted",
+      "seizure",
+      "fits",
+      "behosh",
+      "daura",
+      "बेहोश",
+      "दौरा",
+      "मिर्गी"
+    ],
+    "required_resources": [],
+    "required_beds": [
+      "icu"
+    ],
+    "required_capabilities": [
+      "neurology"
+    ],
+    "required_equipment": [
+      "ct_scan"
+    ]
+  }
+]
