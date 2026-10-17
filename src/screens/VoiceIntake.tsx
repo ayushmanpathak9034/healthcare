@@ -187,18 +187,28 @@ export function VoiceIntake({
       {intakeResult && <IntakeSummaryCard intake={intakeResult} lang={lang} />}
 
       {intakeResult?.followup_question && answers.length < MAX_FOLLOWUPS && (
-        <div className="card p-4 space-y-2 border-2 border-amber-200 bg-amber-50">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            submitAnswer();
+          }}
+          className="card p-4 space-y-2 border-2 border-amber-200 bg-amber-50"
+        >
           <p className="font-medium text-amber-900">{intakeResult.followup_question}</p>
           <input
             value={followupAnswer}
             onChange={(e) => setFollowupAnswer(e.target.value)}
             placeholder={t(lang, 'answer')}
-            className="w-full border-2 border-amber-200 rounded-xl px-3 min-h-[52px] focus:border-amber-400 outline-none"
+            className="w-full border-2 border-amber-200 rounded-xl px-3 min-h-[52px] focus:border-amber-400 outline-none bg-white"
           />
-          <button onClick={submitAnswer} disabled={busy || !followupAnswer.trim()} className="btn-touch w-full bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50">
+          <button
+            type="submit"
+            disabled={busy || !followupAnswer.trim()}
+            className="btn-touch w-full bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50 font-bold"
+          >
             {t(lang, 'nextQuestion')}
           </button>
-        </div>
+        </form>
       )}
 
       {answers.length > 0 && (

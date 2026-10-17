@@ -9,6 +9,7 @@ import { HospitalChooser } from '@/screens/HospitalChooser';
 import { VoiceIntake } from '@/screens/VoiceIntake';
 import { QueueStatus } from '@/screens/QueueStatus';
 import { StaffLogin, StaffDashboard } from '@/screens/StaffDashboard';
+import { LOCAL_HOSPITALS } from '@/lib/localBackend';
 import { t } from '@/lib/i18n';
 
 interface GreenState {
@@ -32,7 +33,17 @@ export default function App() {
 
   useEffect(() => {
     if (!entry) return;
-    hospitalsList().then((d) => setHospitals(d.hospitals ?? [])).catch(() => undefined);
+    hospitalsList()
+      .then((d) => {
+        if (d.hospitals && d.hospitals.length > 0) {
+          setHospitals(d.hospitals);
+        } else {
+          setHospitals(LOCAL_HOSPITALS);
+        }
+      })
+      .catch(() => {
+        setHospitals(LOCAL_HOSPITALS);
+      });
   }, [entry]);
 
   const start = useCallback((r: EntryResult) => {
@@ -61,6 +72,7 @@ export default function App() {
   const [abhaError, setAbhaError] = useState('');
   const [newPatientMode, setNewPatientMode] = useState(false);
   const [lookupBusy, setLookupBusy] = useState(false);
+  const [queueError, setQueueError] = useState('');
 
   async function lookupAbha() {
     const id = abhaInput.trim();
@@ -90,6 +102,7 @@ export default function App() {
 
   async function submitQueue(intake: IntakeResult, transcript: string, answers: { question: string; answer: string }[], ocr: OcrRecord[]) {
     if (!green || !entry || !green.hospital) return;
+    setQueueError('');
     try {
       const result = await queueSubmit({
         language: entry.lang,
@@ -104,8 +117,8 @@ export default function App() {
         ocr_records: ocr,
       });
       setGreen((g) => (g ? { ...g, stage: 'QUEUE', submitted: result, intake } : g));
-    } catch {
-      setEscalation('');
+    } catch (e) {
+      setQueueError((e as Error).message || 'Unable to register queue entry. Please try again.');
     }
   }
 
@@ -178,33 +191,61 @@ export default function App() {
         <div className="max-w-md mx-auto px-4 py-6 space-y-4 fade-in">
           <div className="card p-5 space-y-3">
             <h2 className="text-xl font-bold text-emerald-900">{t(lang, 'abhaTitle')}</h2>
-            <input
-              value={abhaInput}
-              onChange={(e) => setAbhaInput(e.target.value)}
-              placeholder="91-1234-5678-9012"
-              className="w-full border-2 border-emerald-200 rounded-xl px-3 text-lg min-h-[56px] focus:border-emerald-500 outline-none"
-            />
-            <p className="text-xs text-emerald-700">{t(lang, 'abhaHint')}</p>
-            {abhaError && <p className="text-sm text-red-700">{abhaError}</p>}
-            <button onClick={lookupAbha} disabled={lookupBusy} className="btn-touch w-full bg-emerald-700 hover:bg-emerald-800 text-white disabled:opacity-50">
-              {t(lang, 'continue')}
-            </button>
-            <button onClick={() => setNewPatientMode(true)} className="w-full text-sm text-emerald-800 underline py-1">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                lookupAbha();
+              }}
+              className="space-y-3"
+            >
+              <input
+                value={abhaInput}
+                onChange={(e) => {
+                  setAbhaInput(e.target.value);
+                  if (abhaError) setAbhaError('');
+                }}
+                placeholder="91-1234-5678-9012"
+                className="w-full border-2 border-emerald-200 rounded-xl px-3 text-lg min-h-[56px] focus:border-emerald-500 outline-none"
+              />
+              <p className="text-xs text-emerald-700">{t(lang, 'abhaHint')}</p>
+              {abhaError && <p className="text-sm text-red-700 font-medium">{abhaError}</p>}
+              <button
+                type="submit"
+                disabled={lookupBusy}
+                className="btn-touch w-full bg-emerald-700 hover:bg-emerald-800 text-white disabled:opacity-50 font-bold"
+              >
+                {lookupBusy ? t(lang, 'loading') : t(lang, 'continue')}
+              </button>
+            </form>
+            <button
+              type="button"
+              onClick={() => setNewPatientMode(true)}
+              className="w-full text-sm text-emerald-800 underline py-1"
+            >
               {t(lang, 'noAbha')}
             </button>
             {newPatientMode && (
-              <div className="space-y-2 border-t border-emerald-100 pt-3">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  continueAsNew();
+                }}
+                className="space-y-2 border-t border-emerald-100 pt-3"
+              >
                 <input
                   value={phoneInput}
-                  onChange={(e) => setPhoneInput(e.target.value)}
+                  onChange={(e) => {
+                    setPhoneInput(e.target.value);
+                    if (abhaError) setAbhaError('');
+                  }}
                   placeholder={t(lang, 'phonePlaceholder')}
                   inputMode="tel"
                   className="w-full border-2 border-emerald-200 rounded-xl px-3 text-lg min-h-[52px] focus:border-emerald-500 outline-none"
                 />
-                <button onClick={continueAsNew} className="btn-touch w-full bg-emerald-600 text-white">
+                <button type="submit" className="btn-touch w-full bg-emerald-600 text-white font-bold">
                   {t(lang, 'continueAsNew')}
                 </button>
-              </div>
+              </form>
             )}
           </div>
           {green.patient.prior && (
@@ -239,6 +280,13 @@ export default function App() {
     return (
       <div className="min-h-screen">
         <Header lang={lang} onHome={home} />
+        {queueError && (
+          <div className="max-w-2xl mx-auto px-4 pt-4">
+            <p className="p-3 bg-red-100 border border-red-300 rounded-xl text-red-900 text-sm font-semibold">
+              {queueError}
+            </p>
+          </div>
+        )}
         <VoiceIntake
           lang={lang}
           triageFloor={entry.path === 'YELLOW' ? 'URGENT' : 'ROUTINE'}

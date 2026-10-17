@@ -104,6 +104,7 @@ export function DoctorView({ lang, user }: { lang: LangCode; user?: StaffUser })
   const [unlocked, setUnlocked] = useState(isKeyUnlocked());
   const [passphrase, setPassphrase] = useState('doctor123');
   const [unlockError, setUnlockError] = useState('');
+  const [actionError, setActionError] = useState('');
   const [showBreakGlassModal, setShowBreakGlassModal] = useState(false);
   const [breakGlassReason, setBreakGlassReason] = useState('');
   const [expandedScoreId, setExpandedScoreId] = useState<string | null>(null);
@@ -127,7 +128,7 @@ export function DoctorView({ lang, user }: { lang: LangCode; user?: StaffUser })
       setUnlockError('Decryption failed. Please check your passphrase.');
     } else {
       setUnlocked(true);
-      await staffAuditLog('KEY_UNLOCK', user?.username ?? 'doctor1', { method: 'passphrase' }, false);
+      await staffAuditLog('KEY_UNLOCK', user?.username ?? 'doctor1', { method: 'passphrase' }, false).catch(() => {});
     }
   }
 
@@ -140,7 +141,7 @@ export function DoctorView({ lang, user }: { lang: LangCode; user?: StaffUser })
     if (ok) {
       setUnlocked(true);
       setShowBreakGlassModal(false);
-      await staffAuditLog('BREAK_GLASS_ACCESS', user?.username ?? 'doctor1', { reason: breakGlassReason }, true);
+      await staffAuditLog('BREAK_GLASS_ACCESS', user?.username ?? 'doctor1', { reason: breakGlassReason }, true).catch(() => {});
       setBreakGlassReason('');
     }
   }
@@ -157,10 +158,12 @@ export function DoctorView({ lang, user }: { lang: LangCode; user?: StaffUser })
   async function open(id: string) {
     setOpenId(id);
     setBusy(true);
+    setActionError('');
     try {
       const { entry: e } = await staffEntry(id);
       setEntry(e ?? null);
-    } catch {
+    } catch (err) {
+      setActionError((err as Error).message || 'Unable to load patient record');
       setEntry(null);
     } finally {
       setBusy(false);
@@ -187,16 +190,19 @@ export function DoctorView({ lang, user }: { lang: LangCode; user?: StaffUser })
         entry={entry}
         busy={busy}
         unlocked={unlocked}
-        onBack={() => { setOpenId(null); refresh(); }}
+        onBack={() => { setOpenId(null); setEntry(null); refresh(); }}
         onLock={handleLock}
         onApprove={async (summary) => {
           if (!entry?.id) return;
           setBusy(true);
+          setActionError('');
           try {
             await staffApprove(entry.id, summary);
             const { entry: e } = await staffEntry(entry.id);
             setEntry(e ?? null);
             await refresh();
+          } catch (err) {
+            setActionError((err as Error).message);
           } finally {
             setBusy(false);
           }
@@ -204,11 +210,14 @@ export function DoctorView({ lang, user }: { lang: LangCode; user?: StaffUser })
         onOverride={async (level, reason) => {
           if (!entry?.id) return;
           setBusy(true);
+          setActionError('');
           try {
             await staffOverride(entry.id, level, reason);
             const { entry: e } = await staffEntry(entry.id);
             setEntry(e ?? null);
             await refresh();
+          } catch (err) {
+            setActionError((err as Error).message);
           } finally {
             setBusy(false);
           }
@@ -216,10 +225,13 @@ export function DoctorView({ lang, user }: { lang: LangCode; user?: StaffUser })
         onOcr={async (file) => {
           if (!entry?.id) return;
           setBusy(true);
+          setActionError('');
           try {
             const { base64, mime } = await compressImage(file);
             const { record } = await staffOcr(entry.id, base64, mime);
             setEntry((e) => (e ? { ...e, ocr_records: [...(e.ocr_records ?? []), record] } : e));
+          } catch (err) {
+            setActionError((err as Error).message);
           } finally {
             setBusy(false);
           }
@@ -258,7 +270,13 @@ export function DoctorView({ lang, user }: { lang: LangCode; user?: StaffUser })
             <input
               type="password"
               value={passphrase}
-              onChange={(e) => setPassphrase(e.target.value)}
+              onChange={(e) => {
+                setPassphrase(e.target.value);
+                if (unlockError) setUnlockError('');
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleUnlock();
+              }}
               placeholder={t(lang, 'passphrase')}
               className="border-2 border-amber-300 rounded-xl px-3 text-sm h-10 focus:border-amber-500 outline-none flex-1 sm:w-44 bg-white"
             />
@@ -338,7 +356,7 @@ export function DoctorView({ lang, user }: { lang: LangCode; user?: StaffUser })
         </button>
       </div>
 
-      {error && <p className="text-sm text-red-700 font-medium">{error}</p>}
+      {(error || actionError) && <p className="text-sm text-red-700 font-medium">{error || actionError}</p>}
 
       {view === 'QUEUE' && (
         <div className="space-y-3">
@@ -474,9 +492,25 @@ function EntryDetail({
 
   if (!entry) {
     return (
-      <div className="card p-8 text-center text-emerald-700">
-        <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
-        <p>{t(lang, 'loading')}</p>
+      <div className="card p-8 text-center text-emerald-700 space-y-4">
+        {busy ? (
+          <>
+            <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2 text-emerald-600" />
+            <p>{t(lang, 'loading')}</p>
+          </>
+        ) : (
+          <>
+            <AlertTriangle className="w-8 h-8 text-amber-600 mx-auto mb-2" />
+            <p className="font-semibold text-slate-800">Record could not be loaded or access was denied.</p>
+            <button
+              type="button"
+              onClick={onBack}
+              className="btn-touch !min-h-[40px] px-4 bg-emerald-700 text-white font-bold text-xs inline-flex items-center gap-1.5 mx-auto"
+            >
+              ← {t(lang, 'backToQueue')}
+            </button>
+          </>
+        )}
       </div>
     );
   }
@@ -681,8 +715,17 @@ function EntryDetail({
               {/* Doctor Approval Trigger */}
               <div className="pt-3 border-t border-emerald-100">
                 <button
-                  onClick={() => entry.summary && onApprove(entry.summary)}
-                  disabled={busy || !entry.summary}
+                  type="button"
+                  onClick={() => {
+                    const effectiveSummary: IntakeSummary = entry.summary ?? {
+                      chief_complaint: entry.patient_label || 'Clinical consultation',
+                      duration: '1 day',
+                      severity: 5,
+                      relevant_history: [],
+                    };
+                    onApprove(effectiveSummary);
+                  }}
+                  disabled={busy}
                   className="btn-touch w-full !min-h-[48px] bg-emerald-700 hover:bg-emerald-800 text-white font-bold flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
                 >
                   <Stethoscope className="w-5 h-5" />

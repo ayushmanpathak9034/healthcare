@@ -12,6 +12,9 @@ export interface EntryResult {
   path: 'GREEN' | 'YELLOW' | 'RED' | 'STAFF';
 }
 
+const DEFAULT_COORDS = { lat: 28.6139, lng: 77.209 };
+const DEFAULT_LABEL = 'New Delhi (Simulated)';
+
 export function EntryScreen({ onStart }: { onStart: (r: EntryResult) => void }) {
   const [lang, setLang] = useState<LangCode>('en-IN');
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -19,24 +22,40 @@ export function EntryScreen({ onStart }: { onStart: (r: EntryResult) => void }) 
   const [manual, setManual] = useState('');
   const [manualMode, setManualMode] = useState(false);
   const [locError, setLocError] = useState('');
+  const [requestingLoc, setRequestingLoc] = useState(false);
 
   async function requestLocation() {
     setLocError('');
+    setRequestingLoc(true);
     try {
       const loc = await getUserLocation();
       setLocation(loc);
       setLabel(`${loc.lat.toFixed(3)}, ${loc.lng.toFixed(3)}`);
+      setManualMode(false);
     } catch {
       setLocError(t(lang, 'locationDenied'));
       setManualMode(true);
+    } finally {
+      setRequestingLoc(false);
     }
   }
 
   function submitManual() {
-    if (!manual.trim()) return;
-    // Demo: approximate Delhi centre for any manual entry
-    setLocation({ lat: 28.6139, lng: 77.209 });
-    setLabel(manual.trim());
+    const trimmed = manual.trim();
+    if (!trimmed) {
+      setLocError(t(lang, 'cityPinPlaceholder'));
+      return;
+    }
+    // Demo: approximate Delhi centre for manual entry
+    setLocation(DEFAULT_COORDS);
+    setLabel(trimmed);
+    setLocError('');
+  }
+
+  function handleStart(path: 'GREEN' | 'YELLOW' | 'RED' | 'STAFF') {
+    const activeLoc = location ?? DEFAULT_COORDS;
+    const activeLabel = label || DEFAULT_LABEL;
+    onStart({ lang, location: activeLoc, locationLabel: activeLabel, path });
   }
 
   const ready = location !== null;
@@ -52,10 +71,11 @@ export function EntryScreen({ onStart }: { onStart: (r: EntryResult) => void }) 
           {LANGUAGES.map((l) => (
             <button
               key={l.code}
+              type="button"
               onClick={() => setLang(l.code)}
               className={`btn-touch !min-h-[52px] border-2 ${
                 lang === l.code
-                  ? 'bg-emerald-700 text-white border-emerald-700'
+                  ? 'bg-emerald-700 text-white border-emerald-700 font-bold'
                   : 'bg-white text-emerald-900 border-emerald-200 hover:border-emerald-400'
               }`}
             >
@@ -67,34 +87,61 @@ export function EntryScreen({ onStart }: { onStart: (r: EntryResult) => void }) 
 
       {/* 2. Location */}
       <section className="card p-4 space-y-3">
-        <h2 className="font-bold text-lg text-emerald-900 flex items-center gap-2">
-          <MapPin className="w-5 h-5" /> Location
-        </h2>
+        <div className="flex items-center justify-between">
+          <h2 className="font-bold text-lg text-emerald-900 flex items-center gap-2">
+            <MapPin className="w-5 h-5" /> Location
+          </h2>
+          {ready && (
+            <button
+              type="button"
+              onClick={() => { setManualMode(true); setLocation(null); setLabel(''); }}
+              className="text-xs text-emerald-700 underline"
+            >
+              Change
+            </button>
+          )}
+        </div>
+
         {ready ? (
           <p className="text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-sm font-medium">
             {label}
           </p>
         ) : manualMode ? (
-          <div className="space-y-2">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              submitManual();
+            }}
+            className="space-y-2"
+          >
             <div className="flex gap-2">
               <input
                 value={manual}
-                onChange={(e) => setManual(e.target.value)}
+                onChange={(e) => {
+                  setManual(e.target.value);
+                  if (locError) setLocError('');
+                }}
                 placeholder={t(lang, 'cityPinPlaceholder')}
                 className="flex-1 border-2 border-emerald-200 rounded-xl px-3 text-lg min-h-[52px] focus:border-emerald-500 outline-none"
               />
-              <button onClick={submitManual} className="btn-touch bg-emerald-700 text-white px-5">
+              <button type="submit" className="btn-touch bg-emerald-700 text-white px-5 font-bold">
                 {t(lang, 'continue')}
               </button>
             </div>
-            {locError && <p className="text-sm text-red-700">{locError}</p>}
-          </div>
+            {locError && <p className="text-sm text-red-700 font-medium">{locError}</p>}
+          </form>
         ) : (
           <div className="space-y-2">
-            <button onClick={requestLocation} className="btn-touch w-full bg-emerald-700 hover:bg-emerald-800 text-white flex items-center justify-center gap-2">
-              <MapPin className="w-5 h-5" /> {t(lang, 'allowLocation')}
+            <button
+              type="button"
+              onClick={requestLocation}
+              disabled={requestingLoc}
+              className="btn-touch w-full bg-emerald-700 hover:bg-emerald-800 text-white flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <MapPin className="w-5 h-5" /> {requestingLoc ? t(lang, 'loading') : t(lang, 'allowLocation')}
             </button>
             <button
+              type="button"
               onClick={() => setManualMode(true)}
               className="w-full text-sm text-emerald-800 underline flex items-center justify-center gap-1 py-2"
             >
@@ -104,37 +151,38 @@ export function EntryScreen({ onStart }: { onStart: (r: EntryResult) => void }) 
         )}
       </section>
 
-      {/* 3. Three paths */}
+      {/* 3. Three paths (Always actionable - non-blocking) */}
       <section className="grid gap-3">
         <button
-          disabled={!ready}
-          onClick={() => onStart({ lang, location, locationLabel: label, path: 'RED' })}
-          className="btn-touch !min-h-[88px] !text-xl bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white flex flex-col items-center justify-center gap-1 pulse-red"
+          type="button"
+          onClick={() => handleStart('RED')}
+          className="btn-touch !min-h-[88px] !text-xl bg-red-600 hover:bg-red-700 text-white flex flex-col items-center justify-center gap-1 pulse-red"
         >
-          <span>{t(lang, 'emergency')}</span>
+          <span className="font-bold">{t(lang, 'emergency')}</span>
           <span className="text-xs font-normal opacity-90">{t(lang, 'emergencySubtitle')}</span>
         </button>
         <button
-          disabled={!ready}
-          onClick={() => onStart({ lang, location, locationLabel: label, path: 'YELLOW' })}
-          className="btn-touch !min-h-[88px] bg-amber-400 hover:bg-amber-500 disabled:opacity-40 text-amber-950 flex flex-col items-center justify-center gap-1"
+          type="button"
+          onClick={() => handleStart('YELLOW')}
+          className="btn-touch !min-h-[88px] bg-amber-400 hover:bg-amber-500 text-amber-950 flex flex-col items-center justify-center gap-1"
         >
-          <span>{t(lang, 'urgent')}</span>
+          <span className="font-bold">{t(lang, 'urgent')}</span>
           <span className="text-xs font-normal opacity-80">{t(lang, 'urgentSubtitle')}</span>
         </button>
         <button
-          disabled={!ready}
-          onClick={() => onStart({ lang, location, locationLabel: label, path: 'GREEN' })}
-          className="btn-touch !min-h-[88px] bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white flex flex-col items-center justify-center gap-1"
+          type="button"
+          onClick={() => handleStart('GREEN')}
+          className="btn-touch !min-h-[88px] bg-emerald-600 hover:bg-emerald-700 text-white flex flex-col items-center justify-center gap-1"
         >
-          <span>{t(lang, 'routine')}</span>
+          <span className="font-bold">{t(lang, 'routine')}</span>
           <span className="text-xs font-normal opacity-90">{t(lang, 'routineSubtitle')}</span>
         </button>
       </section>
 
       <button
-        onClick={() => onStart({ lang, location, locationLabel: label, path: 'STAFF' })}
-        className="w-full flex items-center justify-center gap-2 text-sm text-emerald-800 underline py-2"
+        type="button"
+        onClick={() => handleStart('STAFF')}
+        className="w-full flex items-center justify-center gap-2 text-sm text-emerald-800 underline py-2 font-medium"
       >
         <Stethoscope className="w-4 h-4" /> {t(lang, 'doctorLogin')}
       </button>

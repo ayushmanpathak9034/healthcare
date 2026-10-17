@@ -75,25 +75,43 @@ export function StaffLogin({ lang, onLoggedIn, onBack }: { lang: LangCode; onLog
             reception1
           </button>
         </div>
-        <input
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder={t(lang, 'username')}
-          className="w-full border-2 border-emerald-200 rounded-xl px-3 text-lg min-h-[52px] focus:border-emerald-500 outline-none"
-        />
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder={t(lang, 'password')}
-          className="w-full border-2 border-emerald-200 rounded-xl px-3 text-lg min-h-[52px] focus:border-emerald-500 outline-none"
-        />
-        <button onClick={login} disabled={busy} className="btn-touch w-full bg-emerald-700 hover:bg-emerald-800 text-white disabled:opacity-50 flex items-center justify-center gap-2">
-          {busy && <Loader2 className="w-5 h-5 animate-spin" />} {t(lang, 'login')}
-        </button>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            login();
+          }}
+          className="space-y-3"
+        >
+          <input
+            value={username}
+            onChange={(e) => {
+              setUsername(e.target.value);
+              if (error) setError('');
+            }}
+            placeholder={t(lang, 'username')}
+            className="w-full border-2 border-emerald-200 rounded-xl px-3 text-lg min-h-[52px] focus:border-emerald-500 outline-none"
+          />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              if (error) setError('');
+            }}
+            placeholder={t(lang, 'password')}
+            className="w-full border-2 border-emerald-200 rounded-xl px-3 text-lg min-h-[52px] focus:border-emerald-500 outline-none"
+          />
+          <button
+            type="submit"
+            disabled={busy}
+            className="btn-touch w-full bg-emerald-700 hover:bg-emerald-800 text-white disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {busy && <Loader2 className="w-5 h-5 animate-spin" />} {t(lang, 'login')}
+          </button>
+        </form>
         <p className="text-xs text-emerald-700">{t(lang, 'loginHint')}</p>
         {error && <p className="text-sm text-red-700 font-medium">{error}</p>}
-        <button onClick={onBack} className="text-sm text-emerald-800 underline">
+        <button type="button" onClick={onBack} className="text-sm text-emerald-800 underline">
           ← {t(lang, 'goHome')}
         </button>
       </div>
