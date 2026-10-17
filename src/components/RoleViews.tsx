@@ -1,622 +1,746 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Loader2, ArrowUp, ArrowDown, Stethoscope, ClipboardList, Activity, Package, Timer, AlertTriangle } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import {
-  staffQueue,
-  staffEntry,
-  staffApprove,
-  staffOverride,
-  staffReorder,
-  staffOcr,
-  staffCapacity,
-  staffAudit,
-  staffAdminOverview,
-  emergencyRespond,
-  asvPlan,
-  asvRequest,
-  asvStatus,
-  asvStock,
-  asvRespond,
-  asvDispatch,
-  asvReceive,
-  type QueueRow,
-  type AsvStatusResult,
-  type AdminOverview,
+  Loader2,
+  ChevronDown,
+  ChevronUp,
+  CheckCircle2,
+  AlertTriangle,
+  RotateCcw,
+  Clock,
+  Bed,
+  Activity,
+  Flame,
+  Check,
+  X,
+} from 'lucide-react';
+import {
+  doctorQueue,
+  doctorOverride,
+  doctorApprove,
+  deskIncoming,
+  deskRespond,
+  updateHospitalResource,
+  updateHospitalBeds,
+  demoFlip,
+  type DoctorQueueEntry,
+  type DeskEmergencyCard,
 } from '@/lib/api';
 import type { LangCode } from '@/types';
-import { t } from '@/lib/i18n';
-import { useRefreshSignal, usePollFallback } from '@/lib/refresh';
-import { compressImage } from '@/lib/helpers';
-
-function useStaffQueue() {
-  const [queue, setQueue] = useState<QueueRow[]>([]);
-  const [error, setError] = useState('');
-  const refresh = useCallback(async () => {
-    try {
-      const { queue: q } = await staffQueue();
-      setQueue(q ?? []);
-      setError('');
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, []);
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-  useRefreshSignal(refresh, 'queue');
-  usePollFallback(refresh);
-  return { queue, error, refresh };
-}
 
 const LEVEL_STYLE: Record<string, string> = {
   ROUTINE: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+  GREEN: 'bg-emerald-100 text-emerald-900 border-emerald-300',
   URGENT: 'bg-amber-100 text-amber-900 border-amber-300',
+  YELLOW: 'bg-amber-100 text-amber-900 border-amber-300',
   EMERGENCY: 'bg-red-100 text-red-900 border-red-300',
+  RED: 'bg-red-100 text-red-900 border-red-300',
 };
 
-// ---------- DOCTOR ----------
-export function DoctorView({ lang }: { lang: LangCode }) {
-  const { queue, error } = useStaffQueue();
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [entry, setEntry] = useState<QueueRow | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [view, setView] = useState<'QUEUE' | 'ASV'>('QUEUE');
+// ==================== DOCTOR VIEW ====================
 
-  async function open(id: string) {
-    setOpenId(id);
-    setBusy(true);
-    try {
-      const { entry: e } = await staffEntry(id);
-      setEntry(e ?? null);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (openId) {
-    return (
-      <EntryDetail
-        lang={lang}
-        entry={entry}
-        busy={busy}
-        onBack={() => setOpenId(null)}
-        onApprove={async () => {
-          if (!entry?.summary) return;
-          setBusy(true);
-          try {
-            await staffApprove(entry.id!, entry.summary);
-            setOpenId(null);
-          } finally {
-            setBusy(false);
-          }
-        }}
-        onOverride={async (level) => {
-          setBusy(true);
-          try {
-            await staffOverride(entry!.id!, level);
-            const { entry: e } = await staffEntry(entry!.id!);
-            setEntry(e ?? null);
-          } finally {
-            setBusy(false);
-          }
-        }}
-        onOcr={async (file) => {
-          setBusy(true);
-          try {
-            const { base64, mime } = await compressImage(file);
-            const { record } = await staffOcr(entry!.id!, base64, mime);
-            setEntry((e) => (e ? { ...e, ocr_records: [...(e.ocr_records ?? []), record] } : e));
-          } finally {
-            setBusy(false);
-          }
-        }}
-      />
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="flex gap-2">
-        <button
-          onClick={() => setView('QUEUE')}
-          className={`btn-touch !min-h-[44px] flex-1 flex items-center justify-center gap-2 border-2 ${view === 'QUEUE' ? 'bg-emerald-700 text-white border-emerald-700' : 'bg-white text-emerald-900 border-emerald-200'}`}
-        >
-          <ClipboardList className="w-4 h-4" /> {t(lang, 'doctorQueue')}
-        </button>
-        <button
-          onClick={() => setView('ASV')}
-          className={`btn-touch !min-h-[44px] flex-1 flex items-center justify-center gap-2 border-2 ${view === 'ASV' ? 'bg-emerald-700 text-white border-emerald-700' : 'bg-white text-emerald-900 border-emerald-200'}`}
-        >
-          <Package className="w-4 h-4" /> ASV
-        </button>
-      </div>
-      {error && <p className="text-sm text-red-700">{error}</p>}
-      {view === 'QUEUE' ? (
-        <>
-          {queue.length === 0 && <p className="text-sm text-emerald-600">{t(lang, 'loading')}</p>}
-          {queue.map((row) => (
-            <button
-              key={row.token}
-              onClick={() => row.id && open(row.id)}
-              className="card p-4 w-full text-left flex items-center gap-3 hover:border-emerald-400"
-            >
-              <span className="font-black text-lg text-emerald-900 w-24">{row.token}</span>
-              <span className={`text-xs font-bold rounded-full px-2 py-1 border ${LEVEL_STYLE[row.triage_level ?? ''] ?? ''}`}>
-                {row.triage_level}
-              </span>
-              <span className="text-sm text-emerald-800 truncate flex-1">
-                {row.summary?.chief_complaint ?? row.patient_label}
-              </span>
-              <span className="text-xs text-emerald-600 uppercase">{row.status}</span>
-            </button>
-          ))}
-        </>
-      ) : (
-        <DoctorAsv lang={lang} />
-      )}
-    </div>
-  );
-}
-
-function DoctorAsv({ lang }: { lang: LangCode }) {
-  const [vials, setVials] = useState('2');
-  const [stable, setStable] = useState(false);
-  const [ref, setRef] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [plan, setPlan] = useState<{ transfer_request_id: string; plan: Awaited<ReturnType<typeof asvPlan>>['plan'] } | null>(null);
-  const [status, setStatus] = useState<AsvStatusResult | null>(null);
-
-  async function makePlan() {
-    setBusy(true);
-    setError('');
-    try {
-      // Demo: doctor's own location — server falls back to city coords when nulls.
-      const result = await asvPlan({ origin_lat: 28.6139, origin_lng: 77.209, vials_needed: Number(vials) || 1, patient_stable: stable, patient_ref: ref.trim() || 'WALKIN' });
-      setPlan(result);
-    } catch (e) {
-      setError((e as Error).message || t(lang, 'errorGeneric'));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function sendRequest() {
-    if (!plan) return;
-    setBusy(true);
-    try {
-      await asvRequest(plan.transfer_request_id);
-      const s = await asvStatus(plan.transfer_request_id);
-      setStatus(s);
-    } catch (e) {
-      setError((e as Error).message || t(lang, 'errorGeneric'));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="card p-4 space-y-2">
-        <h3 className="font-bold text-emerald-900 flex items-center gap-2"><Package className="w-5 h-5" /> ASV request</h3>
-        <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="Patient ref" className="w-full border-2 border-emerald-200 rounded-xl px-3 min-h-[48px]" />
-        <input value={vials} onChange={(e) => setVials(e.target.value)} inputMode="numeric" placeholder="Vials needed" className="w-full border-2 border-emerald-200 rounded-xl px-3 min-h-[48px]" />
-        <label className="flex items-center gap-2 text-sm text-emerald-900">
-          <input type="checkbox" checked={stable} onChange={(e) => setStable(e.target.checked)} /> Patient stable enough to travel
-        </label>
-        <button onClick={makePlan} disabled={busy} className="btn-touch w-full bg-emerald-700 text-white disabled:opacity-50 flex items-center justify-center gap-2">
-          {busy && <Loader2 className="w-4 h-4 animate-spin" />} Plan
-        </button>
-        {error && <p className="text-sm text-red-700">{error}</p>}
-      </div>
-
-      {plan && (
-        <div className="card p-4 space-y-2 fade-in">
-          <p className="font-bold text-emerald-900">{plan.plan.status}</p>
-          <p className="text-sm text-emerald-800">{plan.plan.move_mode}: {plan.plan.move_reason}</p>
-          {plan.plan.sources.map((s) => (
-            <p key={s.batch_id} className="text-sm text-emerald-800">
-              {s.hospital_name} — {s.vials} vial(s), batch {s.batch_code}, ~{s.travel_minutes} min {s.estimated ? '~' : ''}
-              {s.toxicology_24x7 ? ' · 24x7 toxicology' : ''}
-            </p>
-          ))}
-          {plan.plan.warnings.map((w) => (
-            <p key={w} className="text-xs text-amber-800 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> {w}</p>
-          ))}
-          {plan.plan.status === 'PLAN_READY' && (
-            <button onClick={sendRequest} disabled={busy} className="btn-touch w-full bg-emerald-600 text-white">
-              Send request
-            </button>
-          )}
-        </div>
-      )}
-
-      {status && (
-        <div className="card p-4 space-y-1 text-sm fade-in">
-          <p className="font-bold text-emerald-900">Transfer {status.request.status}</p>
-          <p className="text-emerald-800">Current location: {status.current_location ?? '—'}</p>
-          <p className="text-emerald-800">Transit: {status.transit_minutes ?? '—'} min · Cold chain: {status.cold_chain_ok === false ? 'WARNING' : 'OK'}</p>
-          {status.warnings.map((w) => (
-            <p key={w} className="text-xs text-amber-800 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> {w}</p>
-          ))}
-          <ul className="pt-1">
-            {status.custody_events.slice(-5).map((e) => (
-              <li key={e.id} className="text-emerald-700 border-t border-emerald-50 pt-1">
-                {new Date(e.at).toLocaleTimeString()} — {e.event} @ {e.location_name} ({e.actor})
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function EntryDetail({
+export function DoctorView({
   lang,
-  entry,
-  busy,
-  onBack,
-  onApprove,
-  onOverride,
-  onOcr,
+  hospitalId = 'h01',
 }: {
   lang: LangCode;
-  entry: QueueRow | null;
-  busy: boolean;
-  onBack: () => void;
-  onApprove: () => void;
-  onOverride: (level: string) => void;
-  onOcr: (file: File) => void;
+  hospitalId?: string;
 }) {
-  return (
-    <div className="space-y-3 fade-in">
-      <button onClick={onBack} className="text-sm text-emerald-800 underline">← {t(lang, 'backToQueue')}</button>
-      {!entry ? (
-        <p className="text-sm text-emerald-600">{t(lang, 'loading')}</p>
-      ) : (
-        <>
-          <div className="card p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-black text-xl text-emerald-900">{entry.token}</span>
-              <span className={`text-xs font-bold rounded-full px-2 py-1 border ${LEVEL_STYLE[entry.triage_level ?? ''] ?? ''}`}>
-                {entry.triage_level}
-              </span>
-            </div>
-            {entry.summary && (
-              <>
-                <p className="font-semibold text-emerald-900">{entry.summary.chief_complaint}</p>
-                <p className="text-sm text-emerald-800">
-                  {t(lang, 'duration')}: {entry.summary.duration} · {t(lang, 'severity')}: {entry.summary.severity}/10
-                </p>
-                {entry.summary.relevant_history.length > 0 && (
-                  <p className="text-sm text-emerald-800">{t(lang, 'relevantHistory')}: {entry.summary.relevant_history.join(', ')}</p>
-                )}
-              </>
-            )}
-            {entry.transcript && (
-              <p className="text-sm text-emerald-700 border-l-2 border-emerald-200 pl-2 italic">"{entry.transcript}"</p>
-            )}
-            {entry.source_tags && entry.source_tags.length > 0 && (
-              <p className="text-xs text-emerald-600">
-                {t(lang, 'sourceTags')}: {entry.source_tags.map((s) => `${s.claim} (${s.source})`).join(' · ')}
-              </p>
-            )}
-            {entry.prior_history && (
-              <p className="text-sm text-emerald-800">
-                {t(lang, 'priorRecords')}: {entry.prior_history.conditions.join(', ') || '—'} · {entry.prior_history.medicines.join(', ') || '—'}
-              </p>
-            )}
-            {entry.approved_by && <p className="text-xs text-emerald-600">Approved by {entry.approved_by}</p>}
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={onApprove} disabled={busy || !entry.summary} className="btn-touch !min-h-[52px] bg-emerald-600 text-white disabled:opacity-50 flex items-center justify-center gap-2">
-              <Stethoscope className="w-5 h-5" /> {t(lang, 'approve')}
-            </button>
-            <label className="btn-touch !min-h-[52px] bg-white border-2 border-emerald-300 text-emerald-800 flex items-center justify-center gap-2 cursor-pointer">
-              <ClipboardList className="w-5 h-5" /> {t(lang, 'uploadImage')}
-              <input
-                type="file"
-                accept="image/jpeg,image/png"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) onOcr(f);
-                }}
-              />
-            </label>
-          </div>
-
-          <div className="card p-3 space-y-2">
-            <p className="text-sm font-bold text-emerald-900">{t(lang, 'overridePriority')}</p>
-            <div className="grid grid-cols-3 gap-2">
-              {['ROUTINE', 'URGENT', 'EMERGENCY'].map((lv) => (
-                <button
-                  key={lv}
-                  onClick={() => onOverride(lv)}
-                  disabled={busy || lv === entry.triage_level}
-                  className={`btn-touch !min-h-[44px] !text-xs border-2 disabled:opacity-40 ${LEVEL_STYLE[lv]}`}
-                >
-                  {lv}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {entry.ocr_records && entry.ocr_records.length > 0 && (
-            <div className="card p-3 space-y-1">
-              <p className="text-sm font-bold text-emerald-900">{t(lang, 'ocrPrescriptions')}</p>
-              {entry.ocr_records.map((r, i) => (
-                <p key={i} className="text-sm text-emerald-800">
-                  {r.medicines.map((m) => `${m.name} ${m.dosage}`).join(', ') || r.header}
-                </p>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-// ---------- RECEPTION (token numbers only, manual reorder) ----------
-export function ReceptionView({ lang }: { lang: LangCode }) {
-  const { queue, error, refresh } = useStaffQueue();
-  const [busy, setBusy] = useState(false);
-  const [order, setOrder] = useState<string[]>([]);
-
-  const rows = order.length === queue.length && queue.every((r) => r.id && order.includes(r.id))
-    ? order.map((id) => queue.find((r) => r.id === id)!)
-    : queue;
-
-  function move(id: string, dir: -1 | 1) {
-    const ids = rows.map((r) => r.id!);
-    const i = ids.indexOf(id);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= ids.length) return;
-    [ids[i], ids[j]] = [ids[j], ids[i]];
-    setOrder(ids);
-  }
-
-  async function save() {
-    setBusy(true);
-    try {
-      await staffReorder(order);
-      setOrder([]);
-      await refresh();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="space-y-3">
-      <h2 className="font-bold text-emerald-900">{t(lang, 'receptionQueue')}</h2>
-      {error && <p className="text-sm text-red-700">{error}</p>}
-      {rows.map((row, i) => (
-        <div key={row.id ?? row.token} className="card p-3 flex items-center gap-3">
-          <span className="font-black text-lg text-emerald-900">{row.token}</span>
-          <span className={`text-xs font-bold rounded-full px-2 py-1 border ${LEVEL_STYLE[row.triage_level ?? ''] ?? ''}`}>
-            {row.triage_level}
-          </span>
-          <span className="text-xs text-emerald-600 mr-auto">#{row.position}</span>
-          <button onClick={() => row.id && move(row.id, -1)} disabled={i === 0} className="btn-touch !min-h-[44px] !min-w-[44px] bg-emerald-50 border border-emerald-300 disabled:opacity-30">
-            <ArrowUp className="w-4 h-4" />
-          </button>
-          <button onClick={() => row.id && move(row.id, 1)} disabled={i === rows.length - 1} className="btn-touch !min-h-[44px] !min-w-[44px] bg-emerald-50 border border-emerald-300 disabled:opacity-30">
-            <ArrowDown className="w-4 h-4" />
-          </button>
-        </div>
-      ))}
-      {order.length > 0 && (
-        <button onClick={save} disabled={busy} className="btn-touch w-full bg-emerald-700 text-white flex items-center justify-center gap-2">
-          {busy && <Loader2 className="w-4 h-4 animate-spin" />} {t(lang, 'queueUpdated')}
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ---------- ADMIN (capacity, emergency response, ASV legs, stock) ----------
-export function AdminView({ lang }: { lang: LangCode }) {
-  const [hospital, setHospital] = useState<AdminOverview['hospital']>(null);
-  const [overview, setOverview] = useState<AdminOverview | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [queue, setQueue] = useState<DoctorQueueEntry[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [stock, setStock] = useState({ batch_code: '', quantity: '0', expiry_date: '' });
-  const [log, setLog] = useState<{ id: string; ts: string; role: string; action: string; patient_ref: string }[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    try {
-      const [ov, audit] = await Promise.all([staffAdminOverview(), staffAudit()]);
-      setOverview(ov);
-      setHospital(ov.hospital);
-      setLog(audit.log ?? []);
-      setError('');
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }, []);
+  // Override state
+  const [overrideId, setOverrideId] = useState<string | null>(null);
+  const [overrideColour, setOverrideColour] = useState<'GREEN' | 'YELLOW' | 'RED'>('YELLOW');
+  const [overrideReason, setOverrideReason] = useState('');
+  const [actionBusy, setActionBusy] = useState(false);
 
+  // Edit/approve state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editedComplaint, setEditedComplaint] = useState('');
+
+  // 3-second live polling
   useEffect(() => {
-    refresh();
-  }, [refresh]);
-  useRefreshSignal(refresh);
-  usePollFallback(refresh);
+    let active = true;
 
-  async function capacity(field: 'icu_beds_available' | 'ventilators_available', delta: number) {
-    setBusy(true);
+    async function fetchQueue() {
+      try {
+        const res = await doctorQueue(hospitalId);
+        if (active) {
+          setQueue(res.queue || res.entries || []);
+          setError('');
+        }
+      } catch (e) {
+        if (active) setError((e as Error).message);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    fetchQueue();
+    const timer = setInterval(fetchQueue, 3000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [hospitalId]);
+
+  async function handleOverride(entryId: string) {
+    if (!overrideReason.trim()) {
+      alert('Override reason is mandatory.');
+      return;
+    }
+    setActionBusy(true);
     try {
-      await staffCapacity(field, delta);
-      setHospital((h) => (h ? { ...h, [field]: Math.max(0, h[field] + delta) } : h));
+      await doctorOverride(entryId, overrideColour, overrideReason.trim());
+      setOverrideId(null);
+      setOverrideReason('');
+      const res = await doctorQueue(hospitalId);
+      setQueue(res.queue || res.entries || []);
+    } catch (e) {
+      alert((e as Error).message);
     } finally {
-      setBusy(false);
+      setActionBusy(false);
     }
   }
 
-  async function respond(requestId: string, action: 'ACCEPT' | 'DECLINE', reason?: string) {
-    setBusy(true);
+  async function handleApprove(entry: DoctorQueueEntry) {
+    setActionBusy(true);
     try {
-      await emergencyRespond(requestId, action, reason);
-      await refresh();
+      const summaryToSave = {
+        ...entry.draft_summary,
+        chief_complaint: editingId === entry.id ? editedComplaint : entry.draft_summary.chief_complaint,
+      };
+      await doctorApprove(entry.id, summaryToSave);
+      setEditingId(null);
+      const res = await doctorQueue(hospitalId);
+      setQueue(res.queue || res.entries || []);
+    } catch (e) {
+      alert((e as Error).message);
     } finally {
-      setBusy(false);
-    }
-  }
-
-  async function legAction(legId: string, action: 'ACCEPT' | 'DECLINE' | 'DISPATCH' | 'RECEIVE') {
-    setBusy(true);
-    try {
-      if (action === 'ACCEPT') await asvRespond(legId, 'ACCEPT');
-      if (action === 'DECLINE') await asvRespond(legId, 'DECLINE', 'Cannot supply');
-      if (action === 'DISPATCH') await asvDispatch(legId, 'Courier');
-      if (action === 'RECEIVE') await asvReceive(legId, 'Staff');
-      await refresh();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveStock() {
-    if (!stock.batch_code || !stock.expiry_date) return;
-    setBusy(true);
-    try {
-      await asvStock({ batch_code: stock.batch_code, quantity: Number(stock.quantity) || 0, expiry_date: stock.expiry_date });
-      setStock({ batch_code: '', quantity: '0', expiry_date: '' });
-    } finally {
-      setBusy(false);
+      setActionBusy(false);
     }
   }
 
   return (
     <div className="space-y-4">
-      {error && <p className="text-sm text-red-700">{error}</p>}
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-bold text-emerald-900 flex items-center gap-2">
+          Doctor Live Queue ({queue.length} patients)
+        </h2>
+        <span className="text-xs text-emerald-700 flex items-center gap-1">
+          <Clock className="w-3.5 h-3.5 animate-pulse text-emerald-600" /> Auto-updating every 3s
+        </span>
+      </div>
 
-      <section className="card p-4 space-y-2">
-        <h2 className="font-bold text-emerald-900">{t(lang, 'adminCapacity')}</h2>
-        {hospital ? (
-          <>
-            <p className="text-sm text-emerald-800">{hospital.name}</p>
-            <div className="flex items-center justify-between">
-              <span className="text-emerald-800">{t(lang, 'icuBeds')}</span>
-              <span className="flex items-center gap-2">
-                <button onClick={() => capacity('icu_beds_available', -1)} disabled={busy} className="btn-touch !min-h-[44px] !min-w-[44px] bg-emerald-50 border border-emerald-300">−</button>
-                <span className="font-bold text-lg text-emerald-900 w-8 text-center">{hospital.icu_beds_available}</span>
-                <button onClick={() => capacity('icu_beds_available', 1)} disabled={busy} className="btn-touch !min-h-[44px] !min-w-[44px] bg-emerald-50 border border-emerald-300">+</button>
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-emerald-800">{t(lang, 'ventilators')}</span>
-              <span className="flex items-center gap-2">
-                <button onClick={() => capacity('ventilators_available', -1)} disabled={busy} className="btn-touch !min-h-[44px] !min-w-[44px] bg-emerald-50 border border-emerald-300">−</button>
-                <span className="font-bold text-lg text-emerald-900 w-8 text-center">{hospital.ventilators_available}</span>
-                <button onClick={() => capacity('ventilators_available', 1)} disabled={busy} className="btn-touch !min-h-[44px] !min-w-[44px] bg-emerald-50 border border-emerald-300">+</button>
-              </span>
-            </div>
-            <p className="text-emerald-800">{t(lang, 'specialists')}: {hospital.specialists_on_duty.join(', ') || '—'}</p>
-            <p className="text-emerald-800">
-              {t(lang, 'bloodStock')}: {Object.entries(hospital.blood_stock).map(([bg, units]) => `${bg}: ${units}`).join(' · ')}
-            </p>
-          </>
-        ) : (
-          <p className="text-sm text-emerald-600">{t(lang, 'loading')}</p>
-        )}
-      </section>
+      {error && <div className="text-sm text-red-700 bg-red-50 p-2 rounded-lg">{error}</div>}
 
-      <section className="space-y-3">
-        <h2 className="font-bold text-emerald-900">{t(lang, 'incomingRequests')}</h2>
-        {(overview?.my_emergencies ?? []).length === 0 && <p className="text-sm text-emerald-600">No active emergency requests.</p>}
-        {(overview?.my_emergencies ?? []).map((r) => {
-          const row = r as { id: string; kind: string; status: string; current_target_hospital_id: string; accepted_hospital_id: string | null; emergency_summary: IntakeSummaryLike | null; target_deadline_at: string };
-          const isTarget = row.current_target_hospital_id && !row.accepted_hospital_id;
-          return (
-            <div key={row.id} className="card p-4 space-y-2 border-2 border-red-300 bg-red-50">
-              <p className="font-bold text-red-900">{row.kind} · {row.status}</p>
-              {row.emergency_summary?.summary && (
-                <p className="text-sm text-red-800">
-                  {row.emergency_summary.summary.chief_complaint} — {t(lang, 'severity')} {row.emergency_summary.summary.severity}/10
-                </p>
-              )}
-              {isTarget && (
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => respond(row.id, 'ACCEPT')} disabled={busy} className="btn-touch !min-h-[52px] bg-emerald-600 text-white disabled:opacity-50">
-                    {t(lang, 'accept')}
-                  </button>
-                  <button onClick={() => respond(row.id, 'DECLINE', 'No capacity')} disabled={busy} className="btn-touch !min-h-[52px] bg-red-600 text-white disabled:opacity-50">
-                    {t(lang, 'decline')}
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        })}
-        {(overview?.other_emergencies_count ?? 0) > 0 && (
-          <p className="text-xs text-emerald-600">{overview!.other_emergencies_count} other emergency request(s) in the city.</p>
-        )}
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="font-bold text-emerald-900 flex items-center gap-2"><Activity className="w-5 h-5" /> ASV transfers for your hospital</h2>
-        {(overview?.legs ?? []).length === 0 && <p className="text-sm text-emerald-600">No transfer legs.</p>}
-        {(overview?.legs ?? []).map((l) => {
-          const leg = l as { id: string; status: string; vials: number; batch_id: string; deadline_at: string | null; transfer_requests: { patient_ref: string; vials_needed: number } | null };
-          return (
-            <div key={leg.id} className="card p-3 space-y-2">
-              <p className="font-bold text-emerald-900">{leg.transfer_requests?.patient_ref ?? '—'} — {leg.vials} vial(s)</p>
-              <p className="text-xs text-emerald-700 flex items-center gap-1">
-                <Timer className="w-3 h-3" /> {leg.status}{leg.deadline_at ? ` · deadline ${new Date(leg.deadline_at).toLocaleTimeString()}` : ''}
-              </p>
-              {leg.status === 'REQUESTED' && (
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => legAction(leg.id, 'ACCEPT')} disabled={busy} className="btn-touch !min-h-[48px] bg-emerald-600 text-white">{t(lang, 'accept')}</button>
-                  <button onClick={() => legAction(leg.id, 'DECLINE')} disabled={busy} className="btn-touch !min-h-[48px] bg-red-600 text-white">{t(lang, 'decline')}</button>
-                </div>
-              )}
-              {leg.status === 'ACCEPTED' && (
-                <button onClick={() => legAction(leg.id, 'DISPATCH')} disabled={busy} className="btn-touch w-full !min-h-[48px] bg-emerald-700 text-white">Dispatch</button>
-              )}
-              {leg.status === 'DISPATCHED' && (
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => legAction(leg.id, 'RECEIVE')} disabled={busy} className="btn-touch !min-h-[48px] bg-emerald-600 text-white">Receive</button>
-                  <button onClick={() => legAction(leg.id, 'DISPATCH')} disabled={busy} className="btn-touch !min-h-[48px] bg-white border-2 border-emerald-300 text-emerald-800">Handover</button>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </section>
-
-      <section className="card p-4 space-y-2">
-        <h2 className="font-bold text-emerald-900 flex items-center gap-2"><Package className="w-5 h-5" /> ASV stock update</h2>
-        <input value={stock.batch_code} onChange={(e) => setStock((s) => ({ ...s, batch_code: e.target.value }))} placeholder="Batch code" className="w-full border-2 border-emerald-200 rounded-xl px-3 min-h-[48px]" />
-        <div className="grid grid-cols-2 gap-2">
-          <input value={stock.quantity} onChange={(e) => setStock((s) => ({ ...s, quantity: e.target.value }))} inputMode="numeric" placeholder="Quantity" className="w-full border-2 border-emerald-200 rounded-xl px-3 min-h-[48px]" />
-          <input value={stock.expiry_date} onChange={(e) => setStock((s) => ({ ...s, expiry_date: e.target.value }))} type="date" className="w-full border-2 border-emerald-200 rounded-xl px-3 min-h-[48px]" />
+      {loading && queue.length === 0 ? (
+        <div className="card p-8 flex items-center justify-center gap-2 text-emerald-700">
+          <Loader2 className="w-5 h-5 animate-spin" /> Loading live triage queue…
         </div>
-        <button onClick={saveStock} disabled={busy} className="btn-touch w-full bg-emerald-700 text-white">Save stock</button>
-      </section>
+      ) : queue.length === 0 ? (
+        <div className="card p-8 text-center text-emerald-700">
+          No patients waiting in queue for this hospital.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {queue.map((entry, idx) => {
+            const isExpanded = expandedId === entry.id;
+            const colourBadgeClass = LEVEL_STYLE[entry.colour] || LEVEL_STYLE.GREEN;
 
-      <AuditLog lang={lang} log={log} />
+            return (
+              <div
+                key={entry.id || entry.token || idx}
+                className="card p-4 space-y-3 border-2 border-emerald-100 hover:border-emerald-300 transition-colors"
+              >
+                {/* Header Row */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <span className="font-black text-xl text-emerald-950">{entry.token}</span>
+                    <span
+                      className={`text-xs font-bold px-2.5 py-1 rounded-full border ${colourBadgeClass}`}
+                    >
+                      {entry.colour}
+                    </span>
+                    <span className="font-semibold text-emerald-900 text-sm">
+                      {entry.patient_label || 'Patient'}
+                    </span>
+                    {entry.abha_id && (
+                      <span className="text-[11px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded border border-emerald-200">
+                        ABHA: {entry.abha_id}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="bg-emerald-900 text-white font-extrabold text-sm px-3 py-1 rounded-lg">
+                      Score: {entry.score}
+                    </div>
+                    {entry.status === 'APPROVED' ? (
+                      <span className="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-1 rounded flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Approved
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setEditingId(entry.id);
+                          setEditedComplaint(entry.draft_summary.chief_complaint);
+                        }}
+                        className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-2.5 py-1 rounded"
+                      >
+                        Approve
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setExpandedId(isExpanded ? null : entry.id)}
+                      className="p-1 hover:bg-emerald-50 rounded text-emerald-800"
+                    >
+                      {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Review Flags */}
+                {entry.review_flags && entry.review_flags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {entry.review_flags.map((flag, i) => (
+                      <span
+                        key={i}
+                        className="text-[11px] font-semibold bg-amber-50 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-full flex items-center gap-1"
+                      >
+                        <AlertTriangle className="w-3 h-3 text-amber-600" /> {flag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Side-by-Side: AI Summary & Raw Transcript */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-emerald-50/50 p-3 rounded-xl border border-emerald-100 text-xs">
+                  <div className="space-y-1">
+                    <span className="font-bold text-emerald-900 block uppercase tracking-wide">
+                      AI Draft Summary
+                    </span>
+                    {editingId === entry.id ? (
+                      <div className="space-y-2">
+                        <textarea
+                          value={editedComplaint}
+                          onChange={(e) => setEditedComplaint(e.target.value)}
+                          className="w-full border border-emerald-300 rounded p-1.5 text-xs text-emerald-950 font-medium"
+                          rows={2}
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleApprove(entry)}
+                            disabled={actionBusy}
+                            className="bg-emerald-700 text-white px-2 py-0.5 rounded font-bold"
+                          >
+                            Save & Approve
+                          </button>
+                          <button
+                            onClick={() => setEditingId(null)}
+                            className="text-emerald-700 underline"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="text-emerald-950 font-semibold">
+                          {entry.draft_summary?.chief_complaint || 'No complaint details'}
+                        </p>
+                        <p className="text-emerald-800">
+                          Duration: {entry.draft_summary?.duration} · Severity: {entry.draft_summary?.severity}/10
+                        </p>
+                        {entry.draft_summary?.relevant_history &&
+                          entry.draft_summary.relevant_history.length > 0 && (
+                            <p className="text-emerald-700">
+                              History: {entry.draft_summary.relevant_history.join(', ')}
+                            </p>
+                          )}
+                      </>
+                    )}
+                  </div>
+
+                  <div className="space-y-1 md:border-l md:border-emerald-200 md:pl-3">
+                    <span className="font-bold text-emerald-900 block uppercase tracking-wide">
+                      Raw Transcript / Answers
+                    </span>
+                    <p className="italic text-emerald-900">
+                      "{entry.transcript || 'No voice transcript recorded'}"
+                    </p>
+                    {entry.answers && entry.answers.length > 0 && (
+                      <div className="pt-1 space-y-0.5">
+                        {entry.answers.map((a, i) => (
+                          <p key={i} className="text-emerald-800">
+                            <span className="font-medium">Q: {a.question}</span> → A: {a.answer}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Expandable Score Breakdown */}
+                {isExpanded && entry.breakdown && (
+                  <div className="p-3 bg-white rounded-lg border border-emerald-200 text-xs space-y-2 fade-in">
+                    <span className="font-bold text-emerald-900 block">
+                      Priority Score Breakdown (Total: {entry.score})
+                    </span>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-emerald-800">
+                      <div>Base ({entry.colour}): +{entry.breakdown.base}</div>
+                      <div>Moderate Red-Flag: +{entry.breakdown.moderate_red_flag}</div>
+                      <div>Age Risk (&lt;5 or &gt;=60): +{entry.breakdown.age_risk}</div>
+                      <div>Pregnancy: +{entry.breakdown.pregnancy}</div>
+                      <div>Chronic Condition: +{entry.breakdown.chronic_condition}</div>
+                      <div>Wait Time (+1/5m): +{entry.breakdown.wait_time}</div>
+                    </div>
+
+                    {entry.doctor_override && (
+                      <div className="bg-amber-50 border border-amber-300 p-2 rounded text-amber-900 mt-2">
+                        <span className="font-bold">Overridden by Doctor:</span> {entry.doctor_override.original_colour} → {entry.doctor_override.new_colour}
+                        <br />
+                        <span className="font-semibold">Reason:</span> {entry.doctor_override.reason}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Doctor Override Action Panel */}
+                {overrideId === entry.id ? (
+                  <div className="p-3 bg-amber-50 rounded-lg border border-amber-300 space-y-2 text-xs">
+                    <span className="font-bold text-amber-950">Override Patient Priority</span>
+                    <div className="flex gap-2">
+                      {(['GREEN', 'YELLOW', 'RED'] as const).map((c) => (
+                        <button
+                          key={c}
+                          onClick={() => setOverrideColour(c)}
+                          className={`px-3 py-1 rounded font-bold border ${
+                            overrideColour === c
+                              ? 'bg-amber-700 text-white border-amber-700'
+                              : 'bg-white text-amber-900 border-amber-300'
+                          }`}
+                        >
+                          {c}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      type="text"
+                      value={overrideReason}
+                      onChange={(e) => setOverrideReason(e.target.value)}
+                      placeholder="Mandatory clinical justification for override..."
+                      className="w-full border border-amber-300 rounded px-2 py-1 text-xs outline-none"
+                    />
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        onClick={() => handleOverride(entry.id)}
+                        disabled={actionBusy}
+                        className="bg-amber-700 hover:bg-amber-800 text-white font-bold px-3 py-1 rounded disabled:opacity-50"
+                      >
+                        Submit Override
+                      </button>
+                      <button
+                        onClick={() => {
+                          setOverrideId(null);
+                          setOverrideReason('');
+                        }}
+                        className="text-amber-900 underline"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex justify-end gap-2 pt-1 text-xs">
+                    <button
+                      onClick={() => {
+                        setOverrideId(entry.id);
+                        setOverrideColour(entry.colour);
+                      }}
+                      className="text-emerald-700 hover:text-emerald-900 font-semibold underline"
+                    >
+                      Override Priority
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
 
-interface IntakeSummaryLike {
-  summary?: { chief_complaint?: string; severity?: number };
-}
+// ==================== HOSPITAL DESK VIEW ====================
 
-export function AuditLog({ lang, log }: { lang: LangCode; log: { id: string; ts: string; role: string; action: string; patient_ref: string }[] }) {
+export function DeskView({
+  lang,
+  hospitalId = 'h01',
+}: {
+  lang: LangCode;
+  hospitalId?: string;
+}) {
+  const [cards, setCards] = useState<DeskEmergencyCard[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [actionBusy, setActionBusy] = useState(false);
+
+  // Decline dialog state
+  const [declineReqId, setDeclineReqId] = useState<string | null>(null);
+  const [declineReason, setDeclineReason] = useState<
+    'no_bed' | 'no_specialist' | 'no_equipment' | 'other'
+  >('no_bed');
+
+  // Resource & Bed controls
+  const [icuBeds, setIcuBeds] = useState(12);
+  const [generalBeds, setGeneralBeds] = useState(45);
+  const [asvStatus, setAsvStatus] = useState<'available' | 'low' | 'out'>('available');
+  const [thrombolysisStatus, setThrombolysisStatus] = useState<'available' | 'low' | 'out'>('available');
+  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [isStale, setIsStale] = useState(false);
+
+  // Poll incoming emergencies every 3 seconds
+  useEffect(() => {
+    let active = true;
+
+    async function fetchDesk() {
+      try {
+        const res = await deskIncoming(hospitalId);
+        if (active) {
+          setCards(res.incoming || []);
+          setError('');
+        }
+      } catch (e) {
+        if (active) setError((e as Error).message);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    fetchDesk();
+    const timer = setInterval(fetchDesk, 3000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [hospitalId]);
+
+  async function handleAccept(requestId: string) {
+    setActionBusy(true);
+    try {
+      await deskRespond(requestId, hospitalId, 'accept');
+      const res = await deskIncoming(hospitalId);
+      setCards(res.incoming || []);
+      setIcuBeds((prev) => Math.max(0, prev - 1));
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function handleDecline(requestId: string) {
+    setActionBusy(true);
+    try {
+      await deskRespond(requestId, hospitalId, 'decline', declineReason);
+      setDeclineReqId(null);
+      const res = await deskIncoming(hospitalId);
+      setCards(res.incoming || []);
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function handleUpdateBeds(delta: number) {
+    const next = Math.max(0, icuBeds + delta);
+    setIcuBeds(next);
+    setLastUpdated(new Date());
+    setIsStale(false);
+    await updateHospitalBeds(hospitalId, 'icu', next).catch(() => {});
+  }
+
+  async function handleToggleResource(resName: string, current: 'available' | 'low' | 'out') {
+    const cycle: Record<string, 'available' | 'low' | 'out'> = {
+      available: 'low',
+      low: 'out',
+      out: 'available',
+    };
+    const next = cycle[current];
+    if (resName === 'asv') setAsvStatus(next);
+    if (resName === 'thrombolysis') setThrombolysisStatus(next);
+    setLastUpdated(new Date());
+    setIsStale(false);
+    await updateHospitalResource(hospitalId, resName, next).catch(() => {});
+  }
+
+  async function handleDemoFlip(status: 'available' | 'out') {
+    setAsvStatus(status);
+    setLastUpdated(new Date());
+    setIsStale(false);
+    await demoFlip(hospitalId, 'asv', status).catch(() => {});
+  }
+
   return (
-    <section className="card p-4">
-      <h2 className="font-bold text-emerald-900 mb-2">{t(lang, 'auditLog')}</h2>
-      <ul className="text-xs space-y-1 max-h-56 overflow-y-auto">
-        {log.map((l) => (
-          <li key={l.id} className="text-emerald-700 border-b border-emerald-50 pb-1">
-            {new Date(l.ts).toLocaleTimeString()} — <span className="font-semibold">{l.role}</span> {l.action} {l.patient_ref}
-          </li>
-        ))}
-        {log.length === 0 && <li className="text-emerald-500">No entries yet.</li>}
-      </ul>
-    </section>
+    <div className="space-y-6">
+      {/* Resource & Bed Management Panel */}
+      <div className={`card p-4 space-y-3 ${isStale ? 'opacity-60 bg-gray-50' : 'bg-white'}`}>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-100 pb-2">
+          <h3 className="font-bold text-emerald-950 flex items-center gap-2">
+            <Bed className="w-5 h-5 text-emerald-700" /> Bed Counts & Critical Resources
+          </h3>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-emerald-700">
+              Last updated: {lastUpdated.toLocaleTimeString()}
+            </span>
+            <button
+              onClick={() => setIsStale(!isStale)}
+              className="text-[11px] underline text-emerald-800"
+            >
+              {isStale ? 'Mark Fresh' : 'Simulate Stale (&gt;60m)'}
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+          {/* ICU Beds */}
+          <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200">
+            <span className="block text-xs font-semibold text-emerald-800">ICU Beds Available</span>
+            <div className="flex items-center justify-between mt-1">
+              <span className="text-2xl font-black text-emerald-950">{icuBeds}</span>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => handleUpdateBeds(-1)}
+                  className="w-7 h-7 bg-white border border-emerald-300 rounded font-bold hover:bg-emerald-100"
+                >
+                  -
+                </button>
+                <button
+                  onClick={() => handleUpdateBeds(1)}
+                  className="w-7 h-7 bg-white border border-emerald-300 rounded font-bold hover:bg-emerald-100"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* General Beds */}
+          <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200">
+            <span className="block text-xs font-semibold text-emerald-800">General Beds Free</span>
+            <div className="text-2xl font-black text-emerald-950 mt-1">{generalBeds}</div>
+          </div>
+
+          {/* Antivenom (ASV) */}
+          <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 space-y-1">
+            <span className="block text-xs font-semibold text-emerald-800">Antivenom (ASV)</span>
+            <button
+              onClick={() => handleToggleResource('asv', asvStatus)}
+              className={`w-full text-xs font-bold py-1 px-2 rounded uppercase border ${
+                asvStatus === 'available'
+                  ? 'bg-emerald-200 text-emerald-900 border-emerald-400'
+                  : asvStatus === 'low'
+                  ? 'bg-amber-200 text-amber-950 border-amber-400'
+                  : 'bg-red-200 text-red-950 border-red-400'
+              }`}
+            >
+              {asvStatus} (click to toggle)
+            </button>
+          </div>
+
+          {/* Thrombolysis */}
+          <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 space-y-1">
+            <span className="block text-xs font-semibold text-emerald-800">Thrombolysis</span>
+            <button
+              onClick={() => handleToggleResource('thrombolysis', thrombolysisStatus)}
+              className={`w-full text-xs font-bold py-1 px-2 rounded uppercase border ${
+                thrombolysisStatus === 'available'
+                  ? 'bg-emerald-200 text-emerald-900 border-emerald-400'
+                  : thrombolysisStatus === 'low'
+                  ? 'bg-amber-200 text-amber-950 border-amber-400'
+                  : 'bg-red-200 text-red-950 border-red-400'
+              }`}
+            >
+              {thrombolysisStatus} (click to toggle)
+            </button>
+          </div>
+        </div>
+
+        {/* Live Demo Quick Flip Button */}
+        <div className="pt-2 flex items-center justify-between border-t border-emerald-100 text-xs">
+          <span className="font-semibold text-emerald-900">Live Demo Quick Flip:</span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleDemoFlip('out')}
+              className="bg-red-100 hover:bg-red-200 text-red-900 font-bold px-3 py-1 rounded border border-red-300"
+            >
+              Flip Antivenom to "OUT"
+            </button>
+            <button
+              onClick={() => handleDemoFlip('available')}
+              className="bg-emerald-100 hover:bg-emerald-200 text-emerald-900 font-bold px-3 py-1 rounded border border-emerald-300"
+            >
+              Flip Antivenom to "AVAILABLE"
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Incoming Emergency Broadcast Cards */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-bold text-red-900 flex items-center gap-2">
+            <Flame className="w-5 h-5 text-red-600" /> Incoming Emergency Broadcasts ({cards.length})
+          </h3>
+          <span className="text-xs text-emerald-700 flex items-center gap-1">
+            <Clock className="w-3.5 h-3.5 animate-pulse text-emerald-600" /> Auto-polling every 3s
+          </span>
+        </div>
+
+        {error && <div className="text-sm text-red-700 bg-red-50 p-2 rounded-lg">{error}</div>}
+
+        {loading && cards.length === 0 ? (
+          <div className="card p-8 flex items-center justify-center gap-2 text-emerald-700">
+            <Loader2 className="w-5 h-5 animate-spin" /> Checking incoming broadcasts…
+          </div>
+        ) : cards.length === 0 ? (
+          <div className="card p-8 text-center text-emerald-700">
+            No active incoming emergency alerts for this hospital desk.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {cards.map((card) => {
+              const suggestionClass =
+                card.suggestion === 'can_accept'
+                  ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                  : 'bg-amber-100 text-amber-950 border-amber-300';
+
+              return (
+                <div
+                  key={card.request_id}
+                  className="card p-5 space-y-3 border-2 border-red-200 shadow-sm"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-extrabold text-sm uppercase bg-red-600 text-white px-2.5 py-1 rounded-md">
+                        {card.emergency_types.join(', ')}
+                      </span>
+                      <span className="text-xs font-bold text-emerald-900">
+                        {card.distance_km} km away · ETA ~{card.eta_min} min
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {/* Suggestion badge */}
+                      <span
+                        className={`text-xs font-extrabold px-2.5 py-1 rounded-full border ${suggestionClass}`}
+                      >
+                        {card.suggestion === 'can_accept'
+                          ? 'SUGGESTION: CAN ACCEPT'
+                          : 'SUGGESTION: CHECK NEEDED'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Suggestion Reasons */}
+                  <div className="text-xs text-emerald-800 bg-emerald-50/70 p-2 rounded-lg border border-emerald-100">
+                    <span className="font-semibold text-emerald-950">System Assessment: </span>
+                    {card.suggestion_reasons.join(' · ')}
+                  </div>
+
+                  {/* Patient Details */}
+                  <div className="space-y-1 text-sm bg-white p-3 rounded-lg border border-emerald-100">
+                    <p className="font-bold text-emerald-950">
+                      Chief Complaint: {card.summary?.chief_complaint || card.transcript}
+                    </p>
+                    {card.answers && card.answers.length > 0 && (
+                      <div className="pt-1 space-y-0.5 text-xs text-emerald-800">
+                        {card.answers.map((a, i) => (
+                          <p key={i}>
+                            <span className="font-semibold">{a.question}:</span> {a.answer}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Desk Actions */}
+                  {card.my_status === 'pending' ? (
+                    declineReqId === card.request_id ? (
+                      <div className="p-3 bg-amber-50 rounded-lg border border-amber-300 space-y-2 text-xs">
+                        <span className="font-bold text-amber-950">Select Decline Reason:</span>
+                        <select
+                          value={declineReason}
+                          onChange={(e) =>
+                            setDeclineReason(
+                              e.target.value as 'no_bed' | 'no_specialist' | 'no_equipment' | 'other'
+                            )
+                          }
+                          className="w-full border border-amber-300 rounded p-1.5 bg-white font-medium outline-none"
+                        >
+                          <option value="no_bed">No ICU/Emergency Bed Available</option>
+                          <option value="no_specialist">No Specialist on Duty</option>
+                          <option value="no_equipment">Required Equipment Down</option>
+                          <option value="other">Other Operational Reason</option>
+                        </select>
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            onClick={() => handleDecline(card.request_id)}
+                            disabled={actionBusy}
+                            className="bg-red-700 hover:bg-red-800 text-white font-bold px-3 py-1 rounded"
+                          >
+                            Confirm Decline
+                          </button>
+                          <button
+                            onClick={() => setDeclineReqId(null)}
+                            className="text-amber-900 underline"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-3 pt-1">
+                        <button
+                          onClick={() => handleAccept(card.request_id)}
+                          disabled={actionBusy}
+                          className="btn-touch !min-h-[46px] flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-bold flex items-center justify-center gap-2"
+                        >
+                          <Check className="w-5 h-5" /> Accept Emergency (Hold Bed)
+                        </button>
+                        <button
+                          onClick={() => setDeclineReqId(card.request_id)}
+                          disabled={actionBusy}
+                          className="btn-touch !min-h-[46px] px-4 bg-white border-2 border-red-300 text-red-700 font-bold hover:bg-red-50 flex items-center justify-center gap-1.5"
+                        >
+                          <X className="w-4 h-4" /> Decline…
+                        </button>
+                      </div>
+                    )
+                  ) : card.my_status === 'accepted' ? (
+                    <div className="bg-emerald-100 text-emerald-900 font-extrabold text-xs px-3 py-2 rounded-lg border border-emerald-300 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-700" /> Accepted by this hospital. 1 bed held for 30 minutes.
+                    </div>
+                  ) : card.my_status === 'declined' ? (
+                    <div className="bg-gray-100 text-gray-700 font-semibold text-xs px-3 py-2 rounded-lg border border-gray-300">
+                      Declined by this hospital.
+                    </div>
+                  ) : (
+                    <div className="bg-gray-100 text-gray-700 font-semibold text-xs px-3 py-2 rounded-lg border border-gray-300">
+                      Cancelled / Handled by another hospital.
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
