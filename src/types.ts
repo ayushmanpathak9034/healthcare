@@ -12,10 +12,6 @@ export interface LanguageOption {
 export const LANGUAGES: LanguageOption[] = [
   { code: 'en-IN', label: 'English', native: 'English' },
   { code: 'hi-IN', label: 'Hindi', native: 'हिन्दी' },
-  { code: 'ta-IN', label: 'Tamil', native: 'தமிழ்' },
-  { code: 'bn-IN', label: 'Bengali', native: 'বাংলা' },
-  { code: 'mr-IN', label: 'Marathi', native: 'मराठी' },
-  { code: 'te-IN', label: 'Telugu', native: 'తెలుగు' },
 ];
 
 export type { Hospital, IntakeResult, IntakeSummary, OcrMedicine, OcrRecord, PatientRecord, QueueRow, StaffUser, QueueStatusResult } from '@/lib/api';

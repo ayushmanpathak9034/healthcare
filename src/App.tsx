@@ -21,6 +21,7 @@ interface GreenState {
 }
 
 export default function App() {
+  const [appLang, setAppLang] = useState<LangCode>('en-IN');
   const [entry, setEntry] = useState<EntryResult | null>(null);
   const [green, setGreen] = useState<GreenState | null>(null);
   const [escalation, setEscalation] = useState<string | null>(null);
@@ -28,7 +29,14 @@ export default function App() {
   const [staffLoginOpen, setStaffLoginOpen] = useState(false);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
 
-  const lang: LangCode = entry?.lang ?? 'en-IN';
+  const lang: LangCode = entry?.lang ?? appLang;
+
+  function toggleLang(newL: LangCode) {
+    setAppLang(newL);
+    if (entry) {
+      setEntry({ ...entry, lang: newL });
+    }
+  }
 
   useEffect(() => {
     if (!entry) return;
@@ -113,8 +121,8 @@ export default function App() {
   if (!entry) {
     return (
       <div className="min-h-screen">
-        <Header lang="en-IN" onHome={home} />
-        <EntryScreen onStart={start} />
+        <Header lang={lang} onHome={home} onToggleLang={toggleLang} />
+        <EntryScreen onStart={start} currentLang={lang} onLangChange={setAppLang} />
       </div>
     );
   }
@@ -122,7 +130,7 @@ export default function App() {
   if (staffUser) {
     return (
       <div className="min-h-screen">
-        <Header lang={lang} onHome={home} />
+        <Header lang={lang} onHome={home} onToggleLang={toggleLang} />
         <StaffDashboard lang={lang} user={staffUser} onLogout={() => { setStaffUser(null); setStaffLoginOpen(true); }} />
       </div>
     );
@@ -131,7 +139,7 @@ export default function App() {
   if (staffLoginOpen) {
     return (
       <div className="min-h-screen">
-        <Header lang={lang} onHome={home} />
+        <Header lang={lang} onHome={home} onToggleLang={toggleLang} />
         <StaffLogin lang={lang} onLoggedIn={setStaffUser} onBack={home} />
       </div>
     );
@@ -140,7 +148,7 @@ export default function App() {
   if (entry.path === 'RED') {
     return (
       <div className="min-h-screen">
-        <Header lang={lang} onHome={home} />
+        <Header lang={lang} onHome={home} onToggleLang={toggleLang} />
         <RedPath lang={lang} location={entry.location} />
       </div>
     );
@@ -174,7 +182,7 @@ export default function App() {
   if (green.stage === 'ABHA') {
     return (
       <div className="min-h-screen">
-        <Header lang={lang} onHome={home} />
+        <Header lang={lang} onHome={home} onToggleLang={toggleLang} />
         <div className="max-w-md mx-auto px-4 py-6 space-y-4 fade-in">
           <div className="card p-5 space-y-3">
             <h2 className="text-xl font-bold text-emerald-900">{t(lang, 'abhaTitle')}</h2>
@@ -222,7 +230,7 @@ export default function App() {
   if (green.stage === 'HOSPITAL') {
     return (
       <div className="min-h-screen">
-        <Header lang={lang} onHome={home} />
+        <Header lang={lang} onHome={home} onToggleLang={toggleLang} />
         <HospitalChooser
           lang={lang}
           location={entry.location ?? { lat: 28.6139, lng: 77.209 }}
@@ -238,7 +246,7 @@ export default function App() {
   if (green.stage === 'INTAKE') {
     return (
       <div className="min-h-screen">
-        <Header lang={lang} onHome={home} />
+        <Header lang={lang} onHome={home} onToggleLang={toggleLang} />
         <VoiceIntake
           lang={lang}
           triageFloor={entry.path === 'YELLOW' ? 'URGENT' : 'ROUTINE'}

@@ -14,11 +14,15 @@ export function IntakeSummaryCard({ intake, lang }: { intake: IntakeResult; lang
     intake.triage_level === 'EMERGENCY' ? 'bg-red-100 text-red-900 border-red-300'
     : intake.triage_level === 'URGENT' ? 'bg-amber-100 text-amber-900 border-amber-300'
     : 'bg-emerald-100 text-emerald-900 border-emerald-300';
+  const displayLevel =
+    intake.triage_level === 'EMERGENCY' ? t(lang, 'triageEmergency') :
+    intake.triage_level === 'URGENT' ? t(lang, 'triageUrgent') :
+    t(lang, 'triageRoutine');
   return (
     <div className="card p-4 space-y-2 fade-in">
       <div className="flex items-center justify-between gap-2">
         <h3 className="font-bold text-emerald-900">{t(lang, 'aiSuggestion')}</h3>
-        <span className={`text-xs font-bold rounded-full px-2 py-1 border ${levelColor}`}>{intake.triage_level}</span>
+        <span className={`text-xs font-bold rounded-full px-2 py-1 border ${levelColor}`}>{displayLevel}</span>
       </div>
       <p className="text-emerald-900">
         <span className="font-semibold">{t(lang, 'chiefComplaint')}:</span> {intake.summary.chief_complaint}
@@ -61,7 +65,31 @@ export function VoiceIntake({
   const [followupAnswer, setFollowupAnswer] = useState('');
   const [answers, setAnswers] = useState<{ question: string; answer: string }[]>([]);
   const [ocr, setOcr] = useState<OcrRecord[]>([]);
+  const [listeningFollowup, setListeningFollowup] = useState(false);
   const recRef = useRef<ReturnType<typeof createRecognition>>(null);
+  const followupRecRef = useRef<ReturnType<typeof createRecognition>>(null);
+
+  function toggleFollowupMic() {
+    if (listeningFollowup) {
+      followupRecRef.current?.stop();
+      setListeningFollowup(false);
+      return;
+    }
+    const rec = createRecognition(lang);
+    if (!rec) return;
+    followupRecRef.current = rec;
+    rec.onresult = (e) => {
+      let text = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        text += e.results[i][0].transcript;
+      }
+      if (text) setFollowupAnswer((prev) => (prev ? `${prev} ${text}` : text));
+    };
+    rec.onerror = () => setListeningFollowup(false);
+    rec.onend = () => setListeningFollowup(false);
+    rec.start();
+    setListeningFollowup(true);
+  }
 
   function toggleMic() {
     if (listening) {
@@ -189,13 +217,32 @@ export function VoiceIntake({
       {intakeResult?.followup_question && answers.length < MAX_FOLLOWUPS && (
         <div className="card p-4 space-y-2 border-2 border-amber-200 bg-amber-50">
           <p className="font-medium text-amber-900">{intakeResult.followup_question}</p>
-          <input
-            value={followupAnswer}
-            onChange={(e) => setFollowupAnswer(e.target.value)}
-            placeholder={t(lang, 'answer')}
-            className="w-full border-2 border-amber-200 rounded-xl px-3 min-h-[52px] focus:border-amber-400 outline-none"
-          />
-          <button onClick={submitAnswer} disabled={busy || !followupAnswer.trim()} className="btn-touch w-full bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50">
+          <div className="relative">
+            <input
+              value={followupAnswer}
+              onChange={(e) => setFollowupAnswer(e.target.value)}
+              placeholder={t(lang, 'answer')}
+              className="w-full border-2 border-amber-200 rounded-xl px-3 py-2 pr-12 min-h-[52px] focus:border-amber-400 outline-none text-emerald-950"
+              onKeyDown={(e) => e.key === 'Enter' && submitAnswer()}
+            />
+            <button
+              type="button"
+              onClick={toggleFollowupMic}
+              className={`absolute right-2 top-2 p-2 rounded-full ${
+                listeningFollowup
+                  ? 'bg-red-600 text-white animate-pulse'
+                  : 'bg-amber-100 text-amber-900 hover:bg-amber-200'
+              }`}
+              title="Speak answer"
+            >
+              {listeningFollowup ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            </button>
+          </div>
+          <button
+            onClick={submitAnswer}
+            disabled={busy || !followupAnswer.trim()}
+            className="btn-touch w-full bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50"
+          >
             {t(lang, 'nextQuestion')}
           </button>
         </div>
@@ -222,6 +269,10 @@ export function VoiceIntake({
           {t(lang, 'preArrival')} →
         </button>
       )}
+
+      <p className="text-[11px] text-gray-500 text-center">
+        {t(lang, 'demoSimulated')}
+      </p>
     </div>
   );
 }

@@ -137,8 +137,13 @@ export interface EmergencyCreateResult {
 export const emergencyCreate = (body: { kind: 'AMBULANCE' | 'ABHA_FAMILY'; lat?: number; lng?: number; abha_id?: string; language: string }) =>
   api<EmergencyCreateResult>('/emergency/create', body);
 
-export const emergencyAnswers = (body: { request_id: string; answers: { question: string; answer: string }[]; free_text?: string; language: string }) =>
-  api<{ ok: boolean; summary: IntakeResult }>('/emergency/answers', body);
+export const emergencyAnswers = (body: {
+  request_id: string;
+  answers: { question: string; answer: string }[];
+  free_text?: string;
+  transcript?: string;
+  language: string;
+}) => api<{ ok: boolean; summary: IntakeResult }>('/emergency/answers', body);
 
 export interface EmergencyStatusResult {
   status: 'BROADCASTING' | 'ACCEPTED' | 'DECLINED_ALL' | 'CANCELLED';
