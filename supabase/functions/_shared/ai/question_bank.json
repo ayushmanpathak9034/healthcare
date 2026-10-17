@@ -1,0 +1,122 @@
+{
+  "version": "1.0.0",
+  "rules": {
+    "max_followup_green_yellow": 3,
+    "max_followup_red": 3,
+    "no_yes_no_questions": true
+  },
+  "questions": [
+    {
+      "question_id": "pain_location_duration",
+      "category": "pain",
+      "en": "Where exactly is the pain located, and how long has it been troubling you?",
+      "hi": "दर्द शरीर के किस हिस्से में है और यह कितने समय से हो रहा है?",
+      "hinglish": "Dard shareer ke kis hisse me hai aur yeh kab se ho raha hai?"
+    },
+    {
+      "question_id": "pain_nature_severity",
+      "category": "pain",
+      "en": "How would you describe the pain—sharp, dull, or throbbing—and what makes it better or worse?",
+      "hi": "दर्द किस प्रकार का महसूस हो रहा है—तेज, धीमा या धड़कता हुआ—और किस गतिविधि से घटता या बढ़ता है?",
+      "hinglish": "Dard kaisa mehsoos ho raha hai—tez, halka ya chubhan jaisa—aur kis cheez se aaram ya badhav hota hai?"
+    },
+    {
+      "question_id": "fever_duration_temperature",
+      "category": "fever",
+      "en": "How many days have you had fever, and what temperature did you measure?",
+      "hi": "बुखार कितने दिनों से है और थर्मामीटर पर कितना तापमान आया है?",
+      "hinglish": "Bukhar kitne dino se hai aur thermometer par kitna tapman aaya hai?"
+    },
+    {
+      "question_id": "fever_associated_chills",
+      "category": "fever",
+      "en": "What other symptoms accompany the fever, such as shivering, sweating, or body ache?",
+      "hi": "बुखार के साथ और क्या लक्षण हैं, जैसे कंपकंपी, पसीना आना या शरीर में टूटन?",
+      "hinglish": "Bukhar ke sath aur kya takleef hai, jaise thand lagna, paseena aana ya badan dard?"
+    },
+    {
+      "question_id": "breathing_triggers_posture",
+      "category": "breathing",
+      "en": "In what position or during which activity does breathing become most uncomfortable?",
+      "hi": "किस स्थिति में बैठने या कौन-सा काम करने पर सांस लेने में सबसे ज्यादा परेशानी होती है?",
+      "hinglish": "Kis position me baithne ya kya kaam karne par saans lene me sabse zyada dikkat hoti hai?"
+    },
+    {
+      "question_id": "breathing_cough_sputum",
+      "category": "breathing",
+      "en": "What kind of cough do you have, and what is the color of any phlegm coming up?",
+      "hi": "खांसी कैसी आ रही है—सूखी या बलगम वाली—और बलगम का रंग कैसा है?",
+      "hinglish": "Khansi kaisi aa rahi hai—sookhi ya balgam wali—aur balgam ka rang kaisa hai?"
+    },
+    {
+      "question_id": "injury_mechanism_site",
+      "category": "injury/bleeding",
+      "en": "How did the injury occur, and how much swelling or bleeding is visible at the site?",
+      "hi": "चोट कैसे लगी और उस जगह पर कितनी सूजन या खून नजर आ रहा है?",
+      "hinglish": "Chot kaise lagi aur us jagah par kitni soojan ya khoon nikal raha hai?"
+    },
+    {
+      "question_id": "injury_movement_pain",
+      "category": "injury/bleeding",
+      "en": "How much are you able to move the injured area, and where is the tenderness greatest?",
+      "hi": "चोट वाली जगह को आप कितना हिला-डुला पा रहे हैं और छूने पर सबसे तेज दर्द कहाँ होता है?",
+      "hinglish": "Chot wale hisse ko kitna hila pa rahe hain aur chhoone par sabse zyada dard kahan hai?"
+    },
+    {
+      "question_id": "snakebite_time_bite_site",
+      "category": "snakebite",
+      "en": "Exactly where on the body did the bite occur, and approximately how many minutes ago did it happen?",
+      "hi": "शरीर के किस हिस्से पर काटा गया है और यह घटना लगभग कितने मिनट पहले हुई?",
+      "hinglish": "Shareer ke kis hisse par kata gaya hai aur yeh lagbhag kitne minute pehle hua?"
+    },
+    {
+      "question_id": "snakebite_visible_symptoms",
+      "category": "snakebite",
+      "en": "What changes do you notice around the wound, such as swelling, bleeding, drooping eyelids, or difficulty swallowing?",
+      "hi": "घाव के आसपास क्या बदलाव दिख रहे हैं, जैसे सूजन, खून आना, पलकें झपकना या निगलने में कठिनाई?",
+      "hinglish": "Ghav ke aas paas kya badlav dikh rahe hain, jaise soojan, khoon behna, palke jhukna ya nigalne me dikkat?"
+    },
+    {
+      "question_id": "heart_sensation_triggers",
+      "category": "heart",
+      "en": "How does the sensation in your chest or heartbeat feel, and does it spread to your neck, shoulder, or jaw?",
+      "hi": "सीने में या दिल की धड़कन में कैसा अहसास हो रहा है, और क्या यह गर्दन, कंधे या जबड़े की तरफ फैल रहा है?",
+      "hinglish": "Seene me ya dil ki dhadkan me kaisa lag raha hai, aur kya yeh gardan, kandhe ya jabde ki taraf phail raha hai?"
+    },
+    {
+      "question_id": "heart_associated_sweating",
+      "category": "heart",
+      "en": "What additional sensations are you experiencing, such as unusual cold sweats, dizziness, or nausea?",
+      "hi": "इसके अलावा आपको कैसा महसूस हो रहा है, जैसे ठंडा पसीना आना, चक्कर आना या जी मिचलाना?",
+      "hinglish": "Iske alawa aapko aur kya mehsoos ho raha hai, jaise thanda paseena, chakkar aana ya jee ghabrana?"
+    },
+    {
+      "question_id": "stomach_pain_meals_relation",
+      "category": "stomach",
+      "en": "Where in your abdomen is the pain felt, and how does it relate to eating food or drinking water?",
+      "hi": "पेट के किस हिस्से में दर्द हो रहा है और खाना खाने या पानी पीने के बाद इसमें क्या बदलाव आता है?",
+      "hinglish": "Pet ke kis hisse me dard hai aur khana khane ya paani peene ke baad isme kya asar hota hai?"
+    },
+    {
+      "question_id": "stomach_bowel_vomiting",
+      "category": "stomach",
+      "en": "How many times have you had vomiting or loose stools, and what did you notice about the color?",
+      "hi": "उल्टी या दस्त कितनी बार हुए हैं और उनके रंग या रूप में क्या बदलाव देखा?",
+      "hinglish": "Ulti ya dast kitni baar hue hain aur unke rang me kya dekha?"
+    },
+    {
+      "question_id": "general_current_medications",
+      "category": "general",
+      "en": "What regular medicines do you currently take for blood pressure, sugar, thyroid, or other conditions?",
+      "hi": "बीपी, शुगर, थायरॉइड या किसी अन्य बीमारी के लिए आप अभी कौन-सी नियमित दवाइयां ले रहे हैं?",
+      "hinglish": "BP, sugar, thyroid ya kisi aur bimaari ke liye abhi kaunsi niyamit dawai le rahe hain?"
+    },
+    {
+      "question_id": "general_known_allergies",
+      "category": "general",
+      "en": "What known allergies do you have to any medicines, injections, or foods?",
+      "hi": "आपको किसी विशेष दवाई, इंजेक्शन या खाद्य पदार्थ से क्या कोई एलर्जी है?",
+      "hinglish": "Aapko kisi dawa, injection ya khane ki cheez se kya allergy hai?"
+    }
+  ]
+}
