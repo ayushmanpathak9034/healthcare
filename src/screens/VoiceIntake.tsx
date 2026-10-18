@@ -12,12 +12,12 @@ const MAX_FOLLOWUPS = 3;
 export function IntakeSummaryCard({ intake, lang }: { intake: IntakeResult; lang: LangCode }) {
   const levelColor =
     intake.triage_level === 'EMERGENCY' ? 'bg-red-100 text-red-900 border-red-300'
-    : intake.triage_level === 'URGENT' ? 'bg-amber-100 text-amber-900 border-amber-300'
-    : 'bg-emerald-100 text-emerald-900 border-emerald-300';
+      : intake.triage_level === 'URGENT' ? 'bg-amber-100 text-amber-900 border-amber-300'
+        : 'bg-emerald-100 text-emerald-900 border-emerald-300';
   const displayLevel =
     intake.triage_level === 'EMERGENCY' ? t(lang, 'triageEmergency') :
-    intake.triage_level === 'URGENT' ? t(lang, 'triageUrgent') :
-    t(lang, 'triageRoutine');
+      intake.triage_level === 'URGENT' ? t(lang, 'triageUrgent') :
+        t(lang, 'triageRoutine');
   return (
     <div className="card p-4 space-y-2 fade-in">
       <div className="flex items-center justify-between gap-2">
@@ -91,30 +91,107 @@ export function VoiceIntake({
     setListeningFollowup(true);
   }
 
-  function toggleMic() {
+  async function toggleMic() {
     if (listening) {
       recRef.current?.stop();
       setListening(false);
       return;
     }
+
+    setError('');
+
     const rec = createRecognition(lang);
+
     if (!rec) {
       setVoiceSupported(false);
+      setError(
+        'Voice recognition is not supported in this browser. Please use Google Chrome or type your problem.'
+      );
       return;
     }
-    recRef.current = rec;
-    rec.onresult = (e) => {
-      let finalText = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const r = e.results[i][0];
-        if (e.results[i][0].isFinal || r.isFinal) finalText += r.transcript;
+
+    try {
+      // Request microphone permission explicitly before starting
+      // browser speech recognition.
+      if (navigator.mediaDevices?.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
       }
-      if (finalText) setTranscript((prev) => (prev ? `${prev} ${finalText}` : finalText));
-    };
-    rec.onerror = () => setListening(false);
-    rec.onend = () => setListening(false);
-    rec.start();
-    setListening(true);
+
+      recRef.current = rec;
+
+      rec.onresult = (e) => {
+        let finalText = '';
+
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const result = e.results[i];
+          const text = result[0]?.transcript ?? '';
+
+          if (result.isFinal) {
+            finalText += text;
+          }
+        }
+
+        if (finalText.trim()) {
+          setTranscript((prev) =>
+            prev ? `${prev} ${finalText.trim()}` : finalText.trim()
+          );
+        }
+      };
+
+      rec.onerror = (event: unknown) => {
+        setListening(false);
+
+        const errorCode =
+          typeof event === 'object' &&
+            event !== null &&
+            'error' in event
+            ? String((event as { error?: unknown }).error)
+            : 'unknown';
+
+        const messages: Record<string, string> = {
+          'not-allowed':
+            'Microphone permission was denied. Please allow microphone access for localhost.',
+          'service-not-allowed':
+            'Speech recognition service is unavailable. Please check your internet connection.',
+          'audio-capture':
+            'No microphone was detected. Please check your microphone.',
+          'no-speech':
+            'No speech was detected. Please try speaking again.',
+          network:
+            'Speech recognition network service failed. Please check your internet connection.',
+          aborted: 'Voice recognition was stopped.',
+        };
+
+        setError(
+          messages[errorCode] ??
+          `Voice recognition failed (${errorCode}). Please try again or type your problem.`
+        );
+      };
+
+      rec.onend = () => {
+        setListening(false);
+      };
+
+      rec.start();
+      setListening(true);
+    } catch (err) {
+      setListening(false);
+
+      const errorName = err instanceof DOMException ? err.name : '';
+
+      if (errorName === 'NotAllowedError') {
+        setError(
+          'Microphone permission was denied. Click the microphone icon in Chrome and allow access to localhost.'
+        );
+      } else if (errorName === 'NotFoundError') {
+        setError('No microphone was found. Please connect or enable a microphone.');
+      } else {
+        setError(
+          'Unable to start voice recognition. Please try again or type your problem.'
+        );
+      }
+    }
   }
 
   async function analyze() {
@@ -179,9 +256,8 @@ export function VoiceIntake({
       {voiceSupported ? (
         <button
           onClick={toggleMic}
-          className={`btn-touch w-full !min-h-[72px] !text-lg flex items-center justify-center gap-3 ${
-            listening ? 'bg-red-600 text-white pulse-red' : 'bg-emerald-700 hover:bg-emerald-800 text-white'
-          }`}
+          className={`btn-touch w-full !min-h-[72px] !text-lg flex items-center justify-center gap-3 ${listening ? 'bg-red-600 text-white pulse-red' : 'bg-emerald-700 hover:bg-emerald-800 text-white'
+            }`}
         >
           {listening ? <MicOff className="w-7 h-7" /> : <Mic className="w-7 h-7" />}
           {listening ? t(lang, 'micStop') : t(lang, 'micStart')}
@@ -228,11 +304,10 @@ export function VoiceIntake({
             <button
               type="button"
               onClick={toggleFollowupMic}
-              className={`absolute right-2 top-2 p-2 rounded-full ${
-                listeningFollowup
+              className={`absolute right-2 top-2 p-2 rounded-full ${listeningFollowup
                   ? 'bg-red-600 text-white animate-pulse'
                   : 'bg-amber-100 text-amber-900 hover:bg-amber-200'
-              }`}
+                }`}
               title="Speak answer"
             >
               {listeningFollowup ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
