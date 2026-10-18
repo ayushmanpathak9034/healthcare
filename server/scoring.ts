@@ -85,3 +85,4 @@ export function calculateScore(factors: ScoringFactors): ScoreResult {
 
   return { total, breakdown };
 }
+

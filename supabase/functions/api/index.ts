@@ -3,7 +3,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { CORS_HEADERS, EMERGENCY_WINDOW_SEC, LEG_WINDOW_MIN, USE_REAL_HOSPITAL_NAMES } from "../_shared/config.ts";
-import { AuthError, hashPassword, requireRole, signToken, type StaffRole } from "../_shared/auth.ts";
+import { AuthError, hashPassword, verifyPassword, requireRole, signToken, signStatusToken, verifyStatusToken, type StaffRole } from "../_shared/auth.ts";
 import { geminiJson } from "../_shared/gemini.ts";
 import { geocodeAddress, routeMatrix } from "../_shared/maps.ts";
 import { custodyDerived, planAsv, type StockCandidate } from "../_shared/asv.ts";
@@ -38,8 +38,31 @@ function clientIp(req: Request): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
 }
 
+const ABHA_RE = /^91-\d{4}-\d{4}-\d{4}$/;
+function maskAbha(abha: string): string {
+  return `***${abha.slice(-4)}`;
+}
+
 async function logAudit(role: string, action: string, patientRef: string, details?: Record<string, unknown>) {
-  await supabase.from("audit_log").insert({ role, action, patient_ref: patientRef, details: details ?? null });
+  const sanitizedDetails = details ? { ...details } : {};
+  delete (sanitizedDetails as Record<string, unknown>).password;
+  delete (sanitizedDetails as Record<string, unknown>).token;
+  delete (sanitizedDetails as Record<string, unknown>).status_token;
+  delete (sanitizedDetails as Record<string, unknown>).secret;
+
+  let maskedRef = patientRef;
+  if (ABHA_RE.test(maskedRef)) {
+    maskedRef = maskAbha(maskedRef);
+  } else if (/^\+?\d{10,13}$/.test(maskedRef.replace(/\s/g, ""))) {
+    maskedRef = `***${maskedRef.slice(-4)}`;
+  }
+
+  await supabase.from("audit_log").insert({
+    role,
+    action,
+    patient_ref: maskedRef,
+    details: Object.keys(sanitizedDetails).length ? sanitizedDetails : null,
+  });
 }
 
 // Realtime refresh broadcast — no patient data in payload.
@@ -70,8 +93,8 @@ function mockIntake(language: string, transcript: string, triageFloor: string) {
     triage_level: triage,
     emergency_reason: isEmergency ? (REASON_FALLBACK[language] ?? REASON_FALLBACK["en-IN"]) : null,
     summary: {
-      chief_complaint: transcript.slice(0, 120) || "(mock) symptom reported",
-      duration: "(mock) not specified",
+      chief_complaint: transcript.slice(0, 120) || "(demo) symptom reported",
+      duration: "(demo) not specified",
       severity: triage === "EMERGENCY" ? 9 : triage === "URGENT" ? 6 : 3,
       relevant_history: [] as string[],
     },
@@ -82,6 +105,9 @@ function mockIntake(language: string, transcript: string, triageFloor: string) {
         ? "क्या बुखार या दर्द तेज़ है?"
         : "Is the fever or pain severe?",
     mock: true,
+    is_synthetic: true,
+    is_demo: true,
+    disclaimer: "Demonstration triage intake generated from mock fallback rules.",
   };
 }
 
@@ -91,7 +117,10 @@ const MOCK_OCR = {
     { name: "Azithromycin", dosage: "500mg once daily", ocr_confidence: 72, needs_review: true },
   ],
   header: "Mock demo prescription header",
-  warnings: ["Demo mode: mock OCR output, not read from your image."],
+  warnings: ["Demo mode: synthetic mock OCR output for demonstration."],
+  is_synthetic: true,
+  is_demo: true,
+  mock: true,
 };
 
 // ---------- helpers ----------
@@ -101,12 +130,6 @@ function priorityFor(level: string): number {
   if (level === "EMERGENCY") p.base = 100;
   else if (level === "URGENT") p.base = 60;
   return p.base;
-}
-
-const ABHA_RE = /^91-\d{4}-\d{4}-\d{4}$/;
-
-function maskAbha(abha: string): string {
-  return `***${abha.slice(-4)}`;
 }
 
 function validSummary(s: unknown): { ok: boolean; error?: string } {
@@ -229,16 +252,21 @@ ${emergencyOnly ? "This is an EMERGENCY summary request from a family member: tr
   let result: Record<string, unknown> | null = null;
   try {
     result = await geminiJson(prompt);
-  } catch (e) {
-    return json({ error: `AI service error: ${(e as Error).message}`, mock: false }, 502);
+  } catch {
+    return json({ error: "AI service temporarily unavailable", mock: false }, 502);
   }
   if (!result) return json({ ...mockIntake(language, transcript, triageFloor), mock: true });
 
-  // Normalize + enforce floor and emergency reason
+  // Normalize + enforce deterministic emergency escalation and floor
+  const textLower = transcript.toLowerCase();
+  const hasEmergency = EMERGENCY_KEYWORDS.some((k) => textLower.includes(k));
   const level = String(result.triage_level ?? "ROUTINE");
   let normalized = ["ROUTINE", "URGENT", "EMERGENCY"].includes(level) ? level : "ROUTINE";
-  if (triageFloor === "URGENT" && normalized === "ROUTINE") normalized = "URGENT";
-  if (emergencyOnly) normalized = "EMERGENCY";
+  if (hasEmergency || emergencyOnly) {
+    normalized = "EMERGENCY";
+  } else if (triageFloor === "URGENT" && normalized === "ROUTINE") {
+    normalized = "URGENT";
+  }
   const summary = (result.summary as Record<string, unknown> | undefined) ?? {};
   if (!Number.isFinite(Number(summary.severity))) summary.severity = 5;
   summary.chief_complaint = String(summary.chief_complaint ?? "—");
@@ -310,8 +338,8 @@ Deno.serve(async (req: Request) => {
       let result: Record<string, unknown> | null = null;
       try {
         result = await geminiJson(prompt, { base64: imageBase64, mime: mime ?? "image/jpeg" });
-      } catch (e) {
-        return json({ error: `AI service error: ${(e as Error).message}`, mock: false }, 502);
+      } catch {
+        return json({ error: "AI service temporarily unavailable", mock: false }, 502);
       }
       if (!result) return json({ ...MOCK_OCR, mock: true });
       const meds = (result.medicines as { ocr_confidence: number; needs_review?: boolean }[] | undefined) ?? [];
@@ -320,17 +348,29 @@ Deno.serve(async (req: Request) => {
     }
 
     // ---------- public ----------
+    const DEMO_ABHA_IDS = new Set(["91-1234-5678-9012", "91-8812-0000-1111"]);
     if (path === "/patient/lookup") {
-      const abha: string = body.abha_id ?? "";
+      if (!rateLimit(clientIp(req), 10)) return bad("Rate limit exceeded", 429);
+      const abha: string = (body.abha_id ?? "").trim();
       if (!ABHA_RE.test(abha)) return bad("Invalid ABHA format (91-XXXX-XXXX-XXXX)");
+      if (!DEMO_ABHA_IDS.has(abha)) {
+        return bad("ABDM OTP verification required for non-demo ABHA IDs. Prototype access is restricted to verified demo records.", 403);
+      }
       const { data, error } = await supabase
         .from("patients")
         .select("name, conditions, medicines, past_visits, ocr_prescriptions")
         .eq("abha_id", abha)
         .maybeSingle();
-      if (error) return bad(error.message, 500);
+      if (error) return bad("Error fetching patient record", 500);
       await logAudit("PATIENT", "VIEW_RECORDS", maskAbha(abha));
-      return json({ patient: data ?? null });
+      if (!data) return json({ patient: null });
+      return json({
+        patient: {
+          ...data,
+          is_demo_patient: true,
+          disclaimer: "Synthetic demonstration record. In production, ABHA medical records require ABDM M1/M2 OTP authentication.",
+        },
+      });
     }
 
     if (path === "/hospitals/list") {
@@ -340,52 +380,114 @@ Deno.serve(async (req: Request) => {
     }
 
     if (path === "/queue/submit") {
+      if (!rateLimit(clientIp(req), 10)) return bad("Rate limit exceeded", 429);
       const { language, abha_id, hospital_id, triage_floor, transcript, followup_answers, intake, prior_history, ocr_records, phone } = body;
       if (triage_floor !== "ROUTINE" && triage_floor !== "URGENT") return bad("triage_floor must be ROUTINE or URGENT");
+      if (!hospital_id || typeof hospital_id !== "string") return bad("hospital_id required");
       if (abha_id && !ABHA_RE.test(abha_id)) return bad("Invalid ABHA format");
       if (phone && !/^(\+91)?\d{10}$/.test(phone.replace(/\s/g, ""))) return bad("Invalid phone");
+
+      // Verify hospital exists
+      const { data: hosp } = await supabase.from("hospitals").select("id").eq("id", hospital_id).maybeSingle();
+      if (!hosp) return bad("Specified hospital not found", 404);
+
       const intakeObj = (intake ?? {}) as Record<string, unknown>;
       const summaryObj = (intakeObj.summary ?? intakeObj) as Record<string, unknown>;
       const v = validSummary(summaryObj);
       if (!v.ok) return bad(v.error!);
-      const level = String(intakeObj.triage_level ?? triage_floor ?? "ROUTINE");
+
+      // Strict server-side triage calculation: Never trust client to downgrade
+      const text = typeof transcript === "string" ? transcript : "";
+      const lower = text.toLowerCase();
+      const hasEmergency = EMERGENCY_KEYWORDS.some((k) => lower.includes(k));
+      let calculatedLevel = String(intakeObj.triage_level ?? triage_floor);
+      if (!["ROUTINE", "URGENT", "EMERGENCY"].includes(calculatedLevel)) calculatedLevel = triage_floor;
+      if (hasEmergency) {
+        calculatedLevel = "EMERGENCY";
+      } else if (triage_floor === "URGENT" && calculatedLevel === "ROUTINE") {
+        calculatedLevel = "URGENT";
+      }
+
+      const calculatedPriority = priorityFor(calculatedLevel);
+
       const { data: entry, error: e } = await supabase
         .from("queue_entries")
         .insert({
           patient_label: abha_id ? maskAbha(abha_id) : "New patient",
           abha_id: abha_id ?? null,
-          phone: phone ?? null,
-          language: language ?? "en-IN",
-          transcript: transcript ?? "",
-          followup_answers: followup_answers ?? [],
-          triage_level: priorityFor(level) === 100 ? "EMERGENCY" : level,
+          phone: phone ? `+91 ${phone.replace(/\D/g, "").slice(-10)}` : null,
+          language: typeof language === "string" ? language.slice(0, 10) : "en-IN",
+          transcript: text.slice(0, 2000),
+          followup_answers: Array.isArray(followup_answers) ? followup_answers.slice(0, 10) : [],
+          triage_level: calculatedLevel,
           triage_floor,
           summary: summaryObj,
-          source_tags: (intakeObj.source_tags ?? []) as unknown as object,
+          source_tags: (Array.isArray(intakeObj.source_tags) ? intakeObj.source_tags : []) as unknown as object,
           prior_history: prior_history ?? null,
-          ocr_records: ocr_records ?? [],
+          ocr_records: Array.isArray(ocr_records) ? ocr_records.slice(0, 10) : [],
           hospital_id,
-          priority_score: priorityFor(level),
+          priority_score: calculatedPriority,
           status: "SENT_TO_DOCTOR",
         })
         .select()
         .single();
       if (e) return bad(e.message, 500);
+
+      // Generate cryptographically unguessable status token
+      const statusToken = await signStatusToken(entry.id);
+      try {
+        await supabase.from("queue_entries").update({ status_token: statusToken }).eq("id", entry.id);
+      } catch {
+        // Fallback for unmigrated schema; HMAC verification operates independently
+      }
+
       const { count } = await supabase.from("queue_entries").select("*", { count: "exact", head: true }).eq("hospital_id", hospital_id);
       await broadcastRefresh("queue");
       return json({
         token: entry.token,
         entry_id: entry.id,
+        status_token: statusToken,
         position: count ?? 1,
         estimated_wait_minutes: (count ?? 1) * 8,
       });
     }
 
     if (path === "/queue/status") {
-      const { entry_id } = body;
-      const { data: entry } = await supabase.from("queue_entries").select("id, token, triage_level, priority_score, manual_rank, created_at").eq("id", entry_id).maybeSingle();
+      if (!rateLimit(clientIp(req), 60)) return bad("Rate limit exceeded", 429);
+      const { entry_id, status_token } = body;
+      if (!entry_id || typeof entry_id !== "string") return bad("entry_id required");
+
+      let authorized = false;
+      const isStatusValid = await verifyStatusToken(entry_id, status_token);
+      if (isStatusValid) {
+        authorized = true;
+      } else {
+        // Fallback: check if caller has an authorized staff session token for this hospital
+        const auth = req.headers.get("Authorization") ?? "";
+        const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+        if (token) {
+          const claims = await verifyToken(token);
+          if (claims && ["DOCTOR", "RECEPTION", "ADMIN"].includes(claims.role) && claims.hospital_id) {
+            const { data: qe } = await supabase.from("queue_entries").select("hospital_id").eq("id", entry_id).maybeSingle();
+            if (qe && qe.hospital_id === claims.hospital_id) {
+              authorized = true;
+            }
+          }
+        }
+      }
+
+      if (!authorized) {
+        return bad("Unauthorized: a valid status token is required to view queue status", 403);
+      }
+
+      const { data: entry } = await supabase
+        .from("queue_entries")
+        .select("token, triage_level, hospital_id")
+        .eq("id", entry_id)
+        .maybeSingle();
       if (!entry) return bad("Entry not found", 404);
-      const { count } = await supabase.from("queue_entries").select("*", { count: "exact", head: true }).eq("hospital_id", (await supabase.from("queue_entries").select("hospital_id").eq("id", entry_id).maybeSingle()).data?.hospital_id);
+
+      const { count } = await supabase.from("queue_entries").select("*", { count: "exact", head: true }).eq("hospital_id", entry.hospital_id);
       return json({
         token: entry.token,
         position: count ?? 1,
@@ -502,22 +604,66 @@ Deno.serve(async (req: Request) => {
     // ---------- staff ----------
     if (path === "/staff/login") {
       const { username, password } = body;
+      if (typeof username !== "string" || !username.trim() || typeof password !== "string" || !password) {
+        return bad("Username and password required", 400);
+      }
+      if (username.length > 64 || password.length > 128) {
+        return bad("Credentials exceed maximum length", 400);
+      }
+      // Rate limit per IP + username to prevent brute force
+      const loginKey = `login:${clientIp(req)}:${username.toLowerCase().trim()}`;
+      if (!rateLimit(loginKey, 5)) {
+        return bad("Too many login attempts. Please try again in 1 minute.", 429);
+      }
+
       const { data: user } = await supabase
         .from("staff_users")
         .select("id, username, role, display_name, hospital_id, password_hash")
-        .eq("username", username)
+        .eq("username", username.trim())
         .maybeSingle();
-      if (!user) return bad("Invalid credentials", 401);
-      const hash = await hashPassword(password ?? "");
-      if (hash !== user.password_hash) return bad("Invalid credentials", 401);
-      await logAudit(user.role, "STAFF_LOGIN", user.id);
-      const token = await signToken({ sub: user.id, role: user.role as StaffRole, hospital_id: user.hospital_id, display_name: user.display_name });
-      return json({ token, user: { id: user.id, username: user.username, role: user.role, display_name: user.display_name, hospital_id: user.hospital_id } });
+      if (!user || !user.password_hash) return bad("Invalid credentials", 401);
+
+      const { valid, needsRehash } = await verifyPassword(password, user.password_hash);
+      if (!valid) return bad("Invalid credentials", 401);
+
+      // Verify hospital assignment exists and is valid
+      if (user.hospital_id) {
+        const { data: hosp } = await supabase.from("hospitals").select("id").eq("id", user.hospital_id).maybeSingle();
+        if (!hosp) return bad("Account has invalid hospital assignment", 403);
+      }
+
+      // Transparent upgrade to PBKDF2 if user logged in with legacy hash
+      if (needsRehash) {
+        const newHash = await hashPassword(password);
+        const { error: updateErr } = await supabase.from("staff_users").update({ password_hash: newHash }).eq("id", user.id);
+        if (updateErr) {
+          console.error("Warning: Failed to persist upgraded password hash:", updateErr.message);
+        }
+      }
+
+      await logAudit(user.role, "STAFF_LOGIN", user.id, { hospital_id: user.hospital_id });
+      const token = await signToken({
+        sub: user.id,
+        role: user.role as StaffRole,
+        hospital_id: user.hospital_id,
+        display_name: user.display_name,
+      });
+      return json({
+        token,
+        user: {
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          display_name: user.display_name,
+          hospital_id: user.hospital_id,
+        },
+      });
     }
 
     if (path === "/staff/queue") {
       const claims = await requireRole(req, ["DOCTOR", "RECEPTION", "ADMIN"]);
-      const { data, error } = await supabase.from("queue_entries").select("*");
+      if (!claims.hospital_id) return bad("Hospital ID missing from session", 403);
+      const { data, error } = await supabase.from("queue_entries").select("*").eq("hospital_id", claims.hospital_id);
       if (error) return bad(error.message, 500);
       const sorted = [...(data ?? [])].sort((a, b) => {
         if (a.manual_rank != null && b.manual_rank != null) return a.manual_rank - b.manual_rank;
@@ -537,82 +683,125 @@ Deno.serve(async (req: Request) => {
     }
 
     if (path === "/staff/entry") {
-      await requireRole(req, ["DOCTOR"]);
-      const { data: entry } = await supabase.from("queue_entries").select("*").eq("id", body.id).maybeSingle();
+      const claims = await requireRole(req, ["DOCTOR"]);
+      if (!claims.hospital_id) return bad("Doctor has no hospital linked", 403);
+      const { id } = body;
+      if (!id || typeof id !== "string") return bad("id required");
+      const { data: entry } = await supabase
+        .from("queue_entries")
+        .select("*")
+        .eq("id", id)
+        .eq("hospital_id", claims.hospital_id)
+        .maybeSingle();
       if (!entry) return bad("Not found", 404);
-      await logAudit("DOCTOR", "VIEW_ENTRY", entry.id);
+      await logAudit("DOCTOR", "VIEW_ENTRY", entry.id, { hospital_id: claims.hospital_id });
       return json({ entry });
     }
 
     if (path === "/staff/approve") {
-      await requireRole(req, ["DOCTOR"]);
-      const summary = body.summary;
+      const claims = await requireRole(req, ["DOCTOR"]);
+      if (!claims.hospital_id) return bad("Doctor has no hospital linked", 403);
+      const { id, summary } = body;
+      if (!id || typeof id !== "string") return bad("id required");
       const v = validSummary(summary);
       if (!v.ok) return bad(v.error!);
+      const { data: existing } = await supabase
+        .from("queue_entries")
+        .select("id")
+        .eq("id", id)
+        .eq("hospital_id", claims.hospital_id)
+        .maybeSingle();
+      if (!existing) return bad("Entry not found in your hospital", 404);
+      const approvedAt = new Date().toISOString();
       const { error } = await supabase
         .from("queue_entries")
-        .update({ approved_by: claims.display_name, approved_at: new Date().toISOString(), approved_summary: summary, status: "APPROVED" })
-        .eq("id", body.id);
+        .update({ approved_by: claims.display_name, approved_at: approvedAt, approved_summary: summary, status: "APPROVED" })
+        .eq("id", id)
+        .eq("hospital_id", claims.hospital_id);
       if (error) return bad(error.message, 500);
-      await logAudit("DOCTOR", "APPROVE", body.id);
+      await logAudit("DOCTOR", "APPROVE", id, { hospital_id: claims.hospital_id });
       await broadcastRefresh("queue");
-      return json({ ok: true, approved_by: claims.display_name, approved_at: new Date().toISOString() });
+      return json({ ok: true, approved_by: claims.display_name, approved_at: approvedAt });
     }
 
     if (path === "/staff/override") {
-      await requireRole(req, ["DOCTOR"]);
-      const level = body.triage_level;
+      const claims = await requireRole(req, ["DOCTOR"]);
+      if (!claims.hospital_id) return bad("Doctor has no hospital linked", 403);
+      const { id, triage_level: level } = body;
+      if (!id || typeof id !== "string") return bad("id required");
       if (!["ROUTINE", "URGENT", "EMERGENCY"].includes(level)) return bad("Invalid triage level");
-      const { data: before } = await supabase.from("queue_entries").select("triage_level").eq("id", body.id).maybeSingle();
+      const { data: before } = await supabase
+        .from("queue_entries")
+        .select("triage_level")
+        .eq("id", id)
+        .eq("hospital_id", claims.hospital_id)
+        .maybeSingle();
+      if (!before) return bad("Entry not found in your hospital", 404);
       const { error } = await supabase
         .from("queue_entries")
         .update({ triage_level: level, priority_score: priorityFor(level) })
-        .eq("id", body.id);
+        .eq("id", id)
+        .eq("hospital_id", claims.hospital_id);
       if (error) return bad(error.message, 500);
-      await logAudit("DOCTOR", "OVERRIDE_PRIORITY", body.id, { from: before?.triage_level, to: level });
+      await logAudit("DOCTOR", "OVERRIDE_PRIORITY", id, { hospital_id: claims.hospital_id, from: before.triage_level, to: level });
       await broadcastRefresh("queue");
       return json({ ok: true });
     }
 
     if (path === "/staff/reorder") {
-      await requireRole(req, ["RECEPTION"]);
-      const order: string[] = body.order ?? [];
+      const claims = await requireRole(req, ["RECEPTION"]);
+      if (!claims.hospital_id) return bad("Reception has no hospital linked", 403);
+      const order: string[] = Array.isArray(body.order) ? body.order : [];
       for (const [i, id] of order.entries()) {
-        await supabase.from("queue_entries").update({ manual_rank: i }).eq("id", id);
+        await supabase
+          .from("queue_entries")
+          .update({ manual_rank: i })
+          .eq("id", id)
+          .eq("hospital_id", claims.hospital_id);
       }
-      await logAudit("RECEPTION", "REORDER_QUEUE", "", { order });
+      await logAudit("RECEPTION", "REORDER_QUEUE", claims.hospital_id, { hospital_id: claims.hospital_id, count: order.length });
       await broadcastRefresh("queue");
       return json({ ok: true });
     }
 
     if (path === "/staff/ocr") {
-      await requireRole(req, ["DOCTOR"]);
+      const claims = await requireRole(req, ["DOCTOR"]);
+      if (!claims.hospital_id) return bad("Doctor has no hospital linked", 403);
       const { id, imageBase64, mime } = body;
+      if (!id || typeof id !== "string") return bad("id required");
+      if (!imageBase64) return bad("imageBase64 required");
+      const { data: entry } = await supabase
+        .from("queue_entries")
+        .select("ocr_records")
+        .eq("id", id)
+        .eq("hospital_id", claims.hospital_id)
+        .maybeSingle();
+      if (!entry) return bad("Entry not found in your hospital", 404);
       const prompt = `Read this prescription image (OCR). Return JSON {"medicines":[{"name","dosage","ocr_confidence" 0-100,"needs_review"}],"header","warnings"}. needs_review = confidence < 85.`;
       let result: Record<string, unknown> | null = null;
       try {
         result = await geminiJson(prompt, { base64: imageBase64, mime: mime ?? "image/jpeg" });
-      } catch (e) {
-        return json({ error: `AI service error: ${(e as Error).message}` }, 502);
+      } catch {
+        return json({ error: "AI service temporarily unavailable" }, 502);
       }
+      const isMock = !result;
       if (!result) result = structuredClone(MOCK_OCR);
-      const record = { file: "doctor_upload.jpg", date: new Date().toISOString().slice(0, 10), ...(result as object) };
-      const { data: entry } = await supabase.from("queue_entries").select("ocr_records").eq("id", id).maybeSingle();
-      if (!entry) return bad("Not found", 404);
+      const record = { file: "doctor_upload.jpg", date: new Date().toISOString().slice(0, 10), is_synthetic: isMock, ...(result as object) };
       const records = [...(entry.ocr_records ?? []), record];
-      await supabase.from("queue_entries").update({ ocr_records: records }).eq("id", id);
-      await logAudit("DOCTOR", "OCR_UPLOAD", id);
+      await supabase.from("queue_entries").update({ ocr_records: records }).eq("id", id).eq("hospital_id", claims.hospital_id);
+      await logAudit("DOCTOR", "OCR_UPLOAD", id, { hospital_id: claims.hospital_id });
       await broadcastRefresh("queue");
       return json({ ok: true, record });
     }
 
     if (path === "/emergency/respond") {
-      const claims = await requireRole(req, ["ADMIN"]);
+      const claims = await requireRole(req, ["ADMIN", "HOSPITAL_DESK"]);
       if (!claims.hospital_id) return bad("Admin has no hospital linked", 403);
       const { request_id, action, reason } = body;
       const { data: reqRow } = await supabase.from("emergency_requests").select("*").eq("id", request_id).maybeSingle();
       if (!reqRow) return bad("Not found", 404);
-      await runCascade(request_id);      const { data: fresh } = await supabase.from("emergency_requests").select("status, current_target_hospital_id, responses").eq("id", request_id).maybeSingle();
+      await runCascade(request_id);
+      const { data: fresh } = await supabase.from("emergency_requests").select("status, current_target_hospital_id, responses").eq("id", request_id).maybeSingle();
       if (!fresh || fresh.status !== "BROADCASTING") return bad("Request already resolved", 409);
       if (fresh.current_target_hospital_id !== claims.hospital_id) return bad("Your hospital is not the current target", 403);
       if (action === "ACCEPT") {
@@ -625,14 +814,14 @@ Deno.serve(async (req: Request) => {
           .eq("status", "BROADCASTING")
           .eq("current_target_hospital_id", claims.hospital_id);
         if (e) return bad(e.message, 500);
-        await logAudit("ADMIN", "EMERGENCY_ACCEPT", request_id, { hospital: hospital?.name });
+        await logAudit("ADMIN", "EMERGENCY_ACCEPT", request_id, { hospital: hospital?.name, hospital_id: claims.hospital_id });
         await broadcastRefresh("emergency");
         return json({ ok: true, status: "ACCEPTED" });
       }
       if (action === "DECLINE") {
         const responses = [...(fresh.responses ?? []), { hospital_id: claims.hospital_id, action: "DECLINE", reason, at: new Date().toISOString() }];
         await supabase.from("emergency_requests").update({ responses }).eq("id", request_id);
-        await logAudit("ADMIN", "EMERGENCY_DECLINE", request_id, { reason });
+        await logAudit("ADMIN", "EMERGENCY_DECLINE", request_id, { reason, hospital_id: claims.hospital_id });
         await runCascade(request_id);
         await broadcastRefresh("emergency");
         return json({ ok: true, status: "BROADCASTING" });
@@ -649,7 +838,7 @@ Deno.serve(async (req: Request) => {
       if (!h) return bad("Hospital not found", 404);
       const next = Math.max(0, (h[field] as number) + (Number(delta) || 0));
       await supabase.from("hospitals").update({ [field]: next }).eq("id", claims.hospital_id);
-      await logAudit("ADMIN", "CAPACITY_CHANGE", claims.hospital_id, { field, delta, new_value: next });
+      await logAudit("ADMIN", "CAPACITY_CHANGE", claims.hospital_id, { hospital_id: claims.hospital_id, field, delta, new_value: next });
       await broadcastRefresh("queue");
       return json({ ok: true, value: next });
     }
@@ -697,14 +886,22 @@ Deno.serve(async (req: Request) => {
     }
 
     if (path === "/staff/audit") {
-      await requireRole(req, ["DOCTOR", "ADMIN"]);
-      const { data } = await supabase.from("audit_log").select("*").order("ts", { ascending: false }).limit(50);
+      const claims = await requireRole(req, ["DOCTOR", "ADMIN"]);
+      if (!claims.hospital_id) return bad("Hospital ID missing from session", 403);
+      const { data, error } = await supabase
+        .from("audit_log")
+        .select("*")
+        .contains("details", { hospital_id: claims.hospital_id })
+        .order("ts", { ascending: false })
+        .limit(50);
+      if (error) return bad("Error fetching audit records", 500);
       return json({ log: data ?? [] });
     }
 
     // ---------- ASV ----------
     if (path === "/asv/plan") {
       const claims = await requireRole(req, ["DOCTOR"]);
+      if (!claims.hospital_id) return bad("Doctor has no hospital linked", 403);
       const { origin_lat, origin_lng, vials_needed, patient_stable, patient_ref, origin_city } = body;
       const vials = Number(vials_needed);
       if (!Number.isFinite(vials) || vials < 1 || vials > 200) return bad("vials_needed must be 1-200");
@@ -716,11 +913,12 @@ Deno.serve(async (req: Request) => {
         Boolean(patient_stable),
         null,
       );
-      // Create transfer_request in PLANNING
+      // Create transfer_request in PLANNING with requesting_hospital_id explicitly bound to claims.hospital_id
       const { data: tr, error: e } = await supabase
         .from("transfer_requests")
         .insert({
-          patient_ref: patient_ref ?? "WALKIN",
+          patient_ref: patient_ref ? String(patient_ref).slice(0, 50) : "WALKIN",
+          requesting_hospital_id: claims.hospital_id,
           vials_needed: vials,
           decided_by_doctor: claims.display_name,
           status: "PLANNING",
@@ -730,15 +928,22 @@ Deno.serve(async (req: Request) => {
         .select()
         .single();
       if (e) return bad(e.message, 500);
-      await logAudit("DOCTOR", "ASV_PLAN", tr.id, { vials, status: plan.status });
+      await logAudit("DOCTOR", "ASV_PLAN", tr.id, { hospital_id: claims.hospital_id, vials, status: plan.status });
       return json({ transfer_request_id: tr.id, plan });
     }
 
     if (path === "/asv/request") {
       const claims = await requireRole(req, ["DOCTOR"]);
+      if (!claims.hospital_id) return bad("Doctor has no hospital linked", 403);
       const { transfer_request_id } = body;
-      const { data: tr } = await supabase.from("transfer_requests").select("*").eq("id", transfer_request_id).maybeSingle();
-      if (!tr) return bad("Not found", 404);
+      if (!transfer_request_id || typeof transfer_request_id !== "string") return bad("transfer_request_id required");
+      const { data: tr } = await supabase
+        .from("transfer_requests")
+        .select("*")
+        .eq("id", transfer_request_id)
+        .eq("requesting_hospital_id", claims.hospital_id)
+        .maybeSingle();
+      if (!tr) return bad("Transfer request not found for your hospital", 404);
       if (tr.status !== "PLANNING") return bad("Request already sent", 409);
       const plan = tr.plan as { sources?: { batch_id: string; hospital_id: string; vials: number }[] };
       const sources = plan?.sources ?? [];
@@ -761,7 +966,7 @@ Deno.serve(async (req: Request) => {
         await supabase.from("custody_events").insert({ leg_id: leg.id, event: "REQUESTED", location_name: "Requesting hospital", actor: claims.display_name, details: { vials: s.vials } });
       }
       await supabase.from("transfer_requests").update({ status: "REQUESTED" }).eq("id", transfer_request_id);
-      await logAudit("DOCTOR", "ASV_REQUEST", transfer_request_id, { legs: sources.length });
+      await logAudit("DOCTOR", "ASV_REQUEST", transfer_request_id, { hospital_id: claims.hospital_id, legs: sources.length });
       await broadcastRefresh("asv");
       return json({ ok: true, legs: sources.length, deadline_at: deadline });
     }
@@ -770,15 +975,18 @@ Deno.serve(async (req: Request) => {
       const claims = await requireRole(req, ["ADMIN"]);
       if (!claims.hospital_id) return bad("Admin has no hospital linked", 403);
       const { leg_id, action, reason } = body;
+      if (!leg_id || typeof leg_id !== "string") return bad("leg_id required");
       const { data: leg } = await supabase.from("transfer_legs").select("*, transfer_requests(vials_needed, requesting_hospital_id)").eq("id", leg_id).maybeSingle();
       if (!leg) return bad("Not found", 404);
       if (leg.source_hospital_id !== claims.hospital_id) return bad("Not your hospital's leg", 403);
       if (leg.status !== "REQUESTED") return bad(`Leg is ${leg.status}, not REQUESTED`, 409);
       if (action === "ACCEPT") {
         // Atomic conditional update + stock decrement
+        const { data: currentStock } = await supabase.from("asv_stock").select("quantity").eq("id", leg.batch_id).maybeSingle();
+        if (!currentStock || currentStock.quantity < leg.vials) return bad("Insufficient stock or batch changed", 409);
         const { data: batch, error: be } = await supabase
           .from("asv_stock")
-          .update({ quantity: (await supabase.from("asv_stock").select("quantity").eq("id", leg.batch_id).maybeSingle()).data!.quantity - leg.vials })
+          .update({ quantity: currentStock.quantity - leg.vials })
           .eq("id", leg.batch_id)
           .gt("quantity", leg.vials - 1)
           .select()
@@ -792,7 +1000,7 @@ Deno.serve(async (req: Request) => {
         if (e) return bad(e.message, 500);
         const { data: hospital } = await supabase.from("hospitals").select("name").eq("id", claims.hospital_id).maybeSingle();
         await supabase.from("custody_events").insert({ leg_id, event: "ACCEPTED", location_name: hospital?.name ?? "Source hospital", actor: claims.display_name, details: { batch: leg.batch_id } });
-        await logAudit("ADMIN", "ASV_LEG_ACCEPT", leg_id);
+        await logAudit("ADMIN", "ASV_LEG_ACCEPT", leg_id, { hospital_id: claims.hospital_id });
         await broadcastRefresh("asv");
         return json({ ok: true, status: "ACCEPTED" });
       }
@@ -800,7 +1008,7 @@ Deno.serve(async (req: Request) => {
         await supabase.from("transfer_legs").update({ status: "DECLINED", decline_reason: reason ?? "No reason given" }).eq("id", leg_id).eq("status", "REQUESTED");
         const { data: hospital } = await supabase.from("hospitals").select("name").eq("id", claims.hospital_id).maybeSingle();
         await supabase.from("custody_events").insert({ leg_id, event: "DECLINED", location_name: hospital?.name ?? "Source hospital", actor: claims.display_name, details: { reason } });
-        await logAudit("ADMIN", "ASV_LEG_DECLINE", leg_id, { reason });
+        await logAudit("ADMIN", "ASV_LEG_DECLINE", leg_id, { hospital_id: claims.hospital_id, reason });
         await broadcastRefresh("asv");
         return json({ ok: true, status: "DECLINED" });
       }
@@ -808,8 +1016,14 @@ Deno.serve(async (req: Request) => {
     }
 
     if (path === "/asv/timeouts") {
-      await requireRole(req, ["DOCTOR", "ADMIN"]);
-      const { data: overdue } = await supabase.from("transfer_legs").select("*").eq("status", "REQUESTED").lt("deadline_at", new Date().toISOString());
+      const claims = await requireRole(req, ["ADMIN"]);
+      if (!claims.hospital_id) return bad("Admin has no hospital linked", 403);
+      const { data: overdue } = await supabase
+        .from("transfer_legs")
+        .select("*")
+        .eq("source_hospital_id", claims.hospital_id)
+        .eq("status", "REQUESTED")
+        .lt("deadline_at", new Date().toISOString());
       for (const leg of overdue ?? []) {
         await supabase.from("transfer_legs").update({ status: "TIMED_OUT" }).eq("id", leg.id).eq("status", "REQUESTED");
         await supabase.from("custody_events").insert({ leg_id: leg.id, event: "TIMED_OUT", location_name: "Source hospital", actor: "system", details: { sequence_no: leg.sequence_no } });
@@ -822,66 +1036,93 @@ Deno.serve(async (req: Request) => {
       const claims = await requireRole(req, ["ADMIN"]);
       if (!claims.hospital_id) return bad("Admin has no hospital linked", 403);
       const { leg_id, courier } = body;
+      if (!leg_id || typeof leg_id !== "string") return bad("leg_id required");
       const { data: leg } = await supabase.from("transfer_legs").select("*").eq("id", leg_id).maybeSingle();
       if (!leg) return bad("Not found", 404);
       if (leg.source_hospital_id !== claims.hospital_id) return bad("Not your hospital's leg", 403);
       if (leg.status !== "ACCEPTED") return bad("Leg must be ACCEPTED to dispatch", 409);
       const { data: hospital } = await supabase.from("hospitals").select("name").eq("id", claims.hospital_id).maybeSingle();
       await supabase.from("transfer_legs").update({ status: "DISPATCHED" }).eq("id", leg_id).eq("status", "ACCEPTED");
-      await supabase.from("custody_events").insert({ leg_id, event: "DISPATCHED", location_name: hospital?.name ?? "Source hospital", actor: courier ?? claims.display_name });
-      await logAudit("ADMIN", "ASV_DISPATCH", leg_id, { courier });
+      await supabase.from("custody_events").insert({ leg_id, event: "DISPATCHED", location_name: hospital?.name ?? "Source hospital", actor: typeof courier === "string" ? courier.slice(0, 100) : claims.display_name });
+      await logAudit("ADMIN", "ASV_DISPATCH", leg_id, { hospital_id: claims.hospital_id, courier });
       await broadcastRefresh("asv");
       return json({ ok: true });
     }
 
     if (path === "/asv/handover") {
       const claims = await requireRole(req, ["ADMIN", "RECEPTION"]);
-      const { leg_id, location_name, actor } = body;
-      const { data: leg } = await supabase.from("transfer_legs").select("*").eq("id", leg_id).maybeSingle();
+      if (!claims.hospital_id) return bad("Staff has no hospital linked", 403);
+      const { leg_id, location_name } = body;
+      if (!leg_id || typeof leg_id !== "string") return bad("leg_id required");
+      const { data: leg } = await supabase
+        .from("transfer_legs")
+        .select("*, transfer_requests(requesting_hospital_id)")
+        .eq("id", leg_id)
+        .maybeSingle();
       if (!leg) return bad("Not found", 404);
-      await supabase.from("custody_events").insert({ leg_id, event: "HANDOVER", location_name: location_name ?? "Relay point", actor: actor ?? claims.display_name });
-      await logAudit(claims.role, "ASV_HANDOVER", leg_id, { location_name });
+      const tr = leg.transfer_requests as { requesting_hospital_id?: string } | null;
+      if (leg.source_hospital_id !== claims.hospital_id && tr?.requesting_hospital_id !== claims.hospital_id) {
+        return bad("Not authorized for this transfer leg", 403);
+      }
+      await supabase.from("custody_events").insert({
+        leg_id,
+        event: "HANDOVER",
+        location_name: typeof location_name === "string" ? location_name.slice(0, 100) : "Relay point",
+        actor: claims.display_name,
+      });
+      await logAudit(claims.role, "ASV_HANDOVER", leg_id, { hospital_id: claims.hospital_id, location_name });
       await broadcastRefresh("asv");
       return json({ ok: true });
     }
 
     if (path === "/asv/receive") {
       const claims = await requireRole(req, ["DOCTOR", "ADMIN"]);
-      const { leg_id, actor } = body;
+      if (!claims.hospital_id) return bad("Staff has no hospital linked", 403);
+      const { leg_id } = body;
+      if (!leg_id || typeof leg_id !== "string") return bad("leg_id required");
       const { data: leg } = await supabase.from("transfer_legs").select("*, transfer_requests(vials_needed, requesting_hospital_id, id)").eq("id", leg_id).maybeSingle();
       if (!leg) return bad("Not found", 404);
       if (leg.status !== "DISPATCHED") return bad("Leg must be DISPATCHED to receive", 409);
+      const tr = leg.transfer_requests as { vials_needed?: number; requesting_hospital_id?: string; id?: string } | null;
+      if (tr?.requesting_hospital_id !== claims.hospital_id) {
+        return bad("Only the requesting hospital can receive ASV", 403);
+      }
       await supabase.from("transfer_legs").update({ status: "RECEIVED" }).eq("id", leg_id).eq("status", "DISPATCHED");
-      const { data: tr } = await supabase.from("transfer_requests").select("requesting_hospital_id").eq("id", leg.request_id).maybeSingle();
-      if (tr && tr.requesting_hospital_id !== claims.hospital_id && claims.role !== "ADMIN") return bad("Not your hospital", 403);
-      const { data: hospital } = await supabase.from("hospitals").select("name").eq("id", tr?.requesting_hospital_id ?? claims.hospital_id).maybeSingle();
-      await supabase.from("custody_events").insert({ leg_id, event: "RECEIVED", location_name: hospital?.name ?? "Requesting hospital", actor: actor ?? claims.display_name });
+      const { data: hospital } = await supabase.from("hospitals").select("name").eq("id", claims.hospital_id).maybeSingle();
+      await supabase.from("custody_events").insert({ leg_id, event: "RECEIVED", location_name: hospital?.name ?? "Requesting hospital", actor: claims.display_name });
       // Close the request if received vials >= needed
       const { data: legs } = await supabase.from("transfer_legs").select("vials, status").eq("request_id", leg.request_id).eq("status", "RECEIVED");
       const received = (legs ?? []).reduce((s: number, l: { vials: number }) => s + l.vials, 0);
-      const { data: trFull } = await supabase.from("transfer_requests").select("vials_needed").eq("id", leg.request_id).maybeSingle();
-      if (trFull && received >= trFull.vials_needed) {
+      const needed = tr?.vials_needed ?? 0;
+      if (received >= needed) {
         await supabase.from("transfer_requests").update({ status: "CLOSED" }).eq("id", leg.request_id);
       } else {
         await supabase.from("transfer_requests").update({ status: "PARTIAL" }).eq("id", leg.request_id).eq("status", "REQUESTED");
       }
-      await logAudit(claims.role, "ASV_RECEIVE", leg_id, { received, needed: trFull?.vials_needed });
+      await logAudit(claims.role, "ASV_RECEIVE", leg_id, { hospital_id: claims.hospital_id, received, needed });
       await broadcastRefresh("asv");
-      return json({ ok: true, received, needed: trFull?.vials_needed });
+      return json({ ok: true, received, needed });
     }
 
     if (path === "/asv/status") {
-      await requireRole(req, ["DOCTOR", "ADMIN"]);
+      const claims = await requireRole(req, ["DOCTOR", "ADMIN"]);
+      if (!claims.hospital_id) return bad("Staff has no hospital linked", 403);
       const { transfer_request_id } = body;
+      if (!transfer_request_id || typeof transfer_request_id !== "string") return bad("transfer_request_id required");
       const { data: tr } = await supabase.from("transfer_requests").select("*").eq("id", transfer_request_id).maybeSingle();
       if (!tr) return bad("Not found", 404);
       const { data: legs } = await supabase.from("transfer_legs").select("*").eq("request_id", transfer_request_id).order("created_at");
-      const legIds = (legs ?? []).map((l: { id: string }) => l.id);
+      const legList = legs ?? [];
+      const isParty = tr.requesting_hospital_id === claims.hospital_id || legList.some((l: { source_hospital_id: string }) => l.source_hospital_id === claims.hospital_id);
+      if (!isParty) {
+        return bad("Unauthorized to view transfer status of another hospital", 403);
+      }
+      const legIds = legList.map((l: { id: string }) => l.id);
       const { data: events } = await supabase.from("custody_events").select("*").in("leg_id", legIds.length ? legIds : ["00000000-0000-0000-0000-000000000000"]).order("at");
       const custody = custodyDerived((events ?? []).map((e: { event: string; at: string; location_name: string }) => ({ event: e.event, at: e.at, location_name: e.location_name })));
       return json({
         request: tr,
-        legs: legs ?? [],
+        legs: legList,
         custody_events: events ?? [],
         current_location: custody.currentLocation,
         transit_minutes: custody.transitMinutes,
@@ -907,7 +1148,7 @@ Deno.serve(async (req: Request) => {
           { onConflict: "hospital_id,batch_code" },
         );
       if (e) return bad(e.message, 500);
-      await logAudit("ADMIN", "ASV_STOCK_UPDATE", claims.hospital_id, { batch_code, quantity: qty });
+      await logAudit("ADMIN", "ASV_STOCK_UPDATE", claims.hospital_id, { hospital_id: claims.hospital_id, batch_code, quantity: qty });
       await broadcastRefresh("asv");
       return json({ ok: true });
     }
@@ -923,6 +1164,7 @@ Deno.serve(async (req: Request) => {
     return bad("Not found", 404);
   } catch (err) {
     if (err instanceof AuthError) return bad(err.message, err.status);
-    return json({ error: (err as Error).message ?? "Server error" }, 500);
+    console.error("Unhandled API error:", (err as Error).message);
+    return json({ error: "An internal server error occurred" }, 500);
   }
 });

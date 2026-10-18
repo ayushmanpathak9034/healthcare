@@ -76,3 +76,4 @@ test('Scoring: combined factors calculate correct total and breakdown', () => {
   });
   assert.strictEqual(result.total, 104);
 });
+

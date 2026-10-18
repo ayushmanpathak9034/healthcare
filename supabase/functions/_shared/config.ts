@@ -25,7 +25,15 @@ export const STAFF_SALT = "swasthya-demo-salt:";
 export const SESSION_TTL_HOURS = 8;
 
 export function sessionSecret(): string {
-  return Deno.env.get("STAFF_SESSION_SECRET") ?? "demo-only-secret-change-me";
+  const secret = (typeof Deno !== "undefined" ? Deno.env.get("STAFF_SESSION_SECRET") : (globalThis as unknown as { process?: { env?: Record<string, string> } }).process?.env?.STAFF_SESSION_SECRET) ?? "";
+  if (!secret || secret.trim().length < 32 || secret === "demo-only-secret-change-me") {
+    const env = typeof Deno !== "undefined" ? Deno.env.get("DENO_ENV") : (globalThis as unknown as { process?: { env?: Record<string, string> } }).process?.env?.NODE_ENV;
+    if (env === "test") {
+      return "swasthya-test-session-secret-min-32-chars-long-secure-key-123456789";
+    }
+    throw new Error("Server configuration error: STAFF_SESSION_SECRET is missing or weak (minimum 32 characters required).");
+  }
+  return secret;
 }
 
 export function mapsKey(): string | null {

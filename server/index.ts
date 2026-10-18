@@ -1113,3 +1113,4 @@ app.use('/functions/v1/api', (req: Request, res: Response, next: NextFunction) =
 app.listen(PORT, () => {
   console.log(`[Swasthya Setu] Backend server running on http://localhost:${PORT}`);
 });
+

@@ -102,3 +102,4 @@ export const SYNTHETIC_PATIENTS: SyntheticPatient[] = [
     past_visits: ['2026-09-10: Neurology headache clinic'],
   },
 ];
+
