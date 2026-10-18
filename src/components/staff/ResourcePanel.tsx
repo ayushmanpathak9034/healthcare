@@ -518,3 +518,4 @@ export function ResourcePanel({
     </div>
   );
 }
+

@@ -265,3 +265,4 @@ export async function fetchPatientRecords(
   const url = `/api/records?${query.toString()}`;
   return safeFetch(url, { method: 'GET' });
 }
+
