@@ -150,3 +150,8 @@ All endpoints return JSON. Errors are formatted as `{ "error": { "code": "...", 
 - **Escalation Direction**: Priority strictly escalates upward (`GREEN` → `YELLOW` → `RED`).
 - **No Yes/No Buttons**: Patient follow-ups are open voice or text queries.
 - **Pure Scoring**: Prioritization algorithm implemented as an isolated, unit-tested pure function (`server/scoring.ts`).
+
+## Team
+
+Swasthya Setu 2.0 is developed by a collaborative team working across
+AI/triage, backend/security, patient experience, and staff/hospital workflows.
