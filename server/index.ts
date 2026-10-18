@@ -887,6 +887,18 @@ app.get('/api/desk/incoming', (req: Request, res: Response) => {
 
     const etaMin = Math.max(5, Math.round(cand.distance_km * 2.5));
 
+    // added by staff-side: compute specific cancel_reason for cancelled/expired cards
+    let cancelReason: string | null = null;
+    if (cand.status === 'cancelled' || emg.status === 'accepted' || emg.status === 'fallback') {
+      if (emg.status === 'accepted') {
+        cancelReason = `Accepted by ${emg.accepted_hospital_name || 'another hospital'}`;
+      } else if (emg.status === 'fallback') {
+        cancelReason = 'Moved to 108 fallback';
+      } else if (cand.status === 'cancelled') {
+        cancelReason = 'Timed out, moved to the next hospitals';
+      }
+    }
+
     incomingCards.push({
       request_id: emg.request_id,
       emergency_types: emg.emergency_types,
@@ -900,6 +912,8 @@ app.get('/api/desk/incoming', (req: Request, res: Response) => {
       answers: emg.answers,
       my_status: cand.status,
       overall_status: emg.status,
+      cancel_reason: cancelReason,
+      accepted_hospital_name: emg.accepted_hospital_name || null,
       suggestion,
       suggestion_reasons: suggestionReasons,
       created_at: emg.created_at,
@@ -1100,6 +1114,90 @@ app.post('/api/demo/flip', (req: Request, res: Response) => {
     ok: true,
     hospital_id,
     resource: hospital.resources[resource],
+  });
+});
+
+// added by staff-side: GET /api/hospital/resources to fetch beds and resources
+app.get('/api/hospital/resources', (req: Request, res: Response) => {
+  const hospitalId = (req.query.hospital_id as string) || (req.body?.hospital_id as string) || 'h01';
+  const hospital = store.hospitals.find((h) => h.hospital_id === hospitalId);
+  if (!hospital) return sendError(res, 404, 'NOT_FOUND', 'Hospital not found');
+  return res.json({
+    hospital_id: hospital.hospital_id,
+    name: hospital.name,
+    beds: hospital.beds,
+    resources: hospital.resources,
+  });
+});
+
+// added by staff-side: POST /api/demo/stale to simulate stale resource and bed data (>60m)
+app.post('/api/demo/stale', (req: Request, res: Response) => {
+  const hospitalId = (req.body?.hospital_id as string) || (req.query?.hospital_id as string) || 'h01';
+  const hospital = store.hospitals.find((h) => h.hospital_id === hospitalId);
+  if (!hospital) return sendError(res, 404, 'NOT_FOUND', 'Hospital not found');
+  const staleIso = new Date(Date.now() - 75 * 60 * 1000).toISOString();
+  hospital.beds.last_updated = staleIso;
+  for (const key of Object.keys(hospital.resources)) {
+    hospital.resources[key].updated_at = staleIso;
+  }
+  return res.json({
+    ok: true,
+    message: 'Simulated stale timestamps (>60m)',
+    beds: hospital.beds,
+    resources: hospital.resources,
+  });
+});
+
+// added by staff-side: GET /api/records?entry_id=... to return simulated OCR patient records
+app.get('/api/records', (req: Request, res: Response) => {
+  const entryId = (req.query.entry_id as string) || '';
+  const abhaId = (req.query.abha_id as string) || '';
+
+  let patient = abhaId ? store.patients.get(abhaId) : undefined;
+  if (!patient && entryId) {
+    const qEntry = store.queue.get(entryId);
+    if (qEntry?.abha_id) {
+      patient = store.patients.get(qEntry.abha_id);
+    }
+  }
+
+  // Realistic synthetic sample records for seeded demo patient
+  const records = [
+    {
+      id: 'rec-01',
+      title: 'Complete Blood Count (CBC) & Metabolic Panel',
+      date: '2026-09-18',
+      extracted_text: `PATIENT DIAGNOSTIC LABORATORY
+Report Date: 18-Sep-2026
+Hemoglobin (Hb): 13.8 g/dL (Normal: 13.0 - 17.0)
+Total Leukocyte Count (WBC): 6,900 /uL (Normal: 4000 - 11000)
+Platelet Count: 245,000 /uL (Normal: 150000 - 450000)
+Fasting Blood Sugar: 118 mg/dL [ELEVATED]
+Serum Creatinine: 0.92 mg/dL
+Remarks: Mild fasting hyperglycemia. Maintain current oral hypoglycemic regimen.`,
+      confidence: 94,
+    },
+    {
+      id: 'rec-02',
+      title: 'Prior OPD Prescription & Clinical Notes',
+      date: '2026-07-24',
+      extracted_text: `COMMUNITY HEALTH CENTRE - MEDICINE OPD
+Date: 24-Jul-2026
+Clinical Findings: BP 136/84 mmHg, Pulse 76 bpm, Afebrile, Chest Clear
+Diagnosis: Primary Essential Hypertension, Follow-up
+Rx:
+1. Tab. Amlodipine 5mg - 1 tab OD (morning) x 30 days
+2. Tab. Metformin 500mg - 1 tab BD (after meals) x 30 days
+3. SOS Tab. Paracetamol 650mg for bodyache
+Advice: Low salt diet, 30 min daily brisk walking. Review after 1 month.`,
+      confidence: 89,
+    },
+  ];
+
+  return res.json({
+    entry_id: entryId,
+    patient_name: patient?.name || 'Demo Patient',
+    records,
   });
 });
 

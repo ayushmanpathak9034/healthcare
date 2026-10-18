@@ -227,6 +227,23 @@ export class AppStore {
             status: 'available',
             updated_at: nowIso,
           },
+          // added by staff-side: rate_control_drugs and blood groups for resource panel
+          rate_control_drugs: {
+            status: 'available',
+            updated_at: nowIso,
+          },
+          blood_a_pos: {
+            status: 'available',
+            updated_at: nowIso,
+          },
+          blood_b_pos: {
+            status: 'available',
+            updated_at: nowIso,
+          },
+          blood_ab_pos: {
+            status: 'available',
+            updated_at: nowIso,
+          },
         },
         queue_length: 5 + (idx % 12),
         held_beds: [],
