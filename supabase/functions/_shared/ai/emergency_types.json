@@ -1,0 +1,327 @@
+{
+  "version": "1.0.0",
+  "negation_patterns": [
+    "\\bno\\b",
+    "\\bnot\\b",
+    "\\bdenies\\b",
+    "\\bdenied\\b",
+    "\\bwithout\\b",
+    "\\bdoesn't have\\b",
+    "\\bdoes not have\\b",
+    "\\bfree of\\b",
+    "\\bnahi\\b",
+    "\\bnahi hai\\b",
+    "\\bna ho\\b",
+    "\\bkoi.*nahi\\b",
+    "नहीं",
+    "नहीं है",
+    "कोई.*नहीं",
+    "बिना"
+  ],
+  "emergency_types": [
+    {
+      "type": "chest_pain",
+      "severity": "critical",
+      "required_resources": ["ecg", "cardiac_monitor", "defibrillator", "thrombolysis", "icu_bed"],
+      "keywords_en": [
+        "chest pain",
+        "chest tightness",
+        "chest pressure",
+        "heart attack",
+        "crushing pain in chest",
+        "pain radiating to left arm",
+        "angina"
+      ],
+      "keywords_hinglish": [
+        "chhati me dard",
+        "chhati me bahut tez dard",
+        "chhati me tez dard",
+        "chhati me bhari pan",
+        "chhati me dabav",
+        "seene me dard",
+        "seene me bahut tez dard",
+        "seene me tez dard",
+        "seene me bohot dard",
+        "seene me jalan aur dard",
+        "dil ka daura",
+        "seene me bojh"
+      ],
+      "keywords_hi": [
+        "छाती में दर्द",
+        "सीने में दर्द",
+        "छाती में भारीपन",
+        "दिल का दौरा",
+        "सीने में दबाव",
+        "सीने में असहनीय दर्द"
+      ]
+    },
+    {
+      "type": "breathing_difficulty",
+      "severity": "critical",
+      "required_resources": ["oxygen", "ventilator", "icu_bed", "nebulizer"],
+      "keywords_en": [
+        "difficulty breathing",
+        "shortness of breath",
+        "cannot breathe",
+        "gasping for air",
+        "severe breathlessness",
+        "choking",
+        "respiratory distress",
+        "stridor"
+      ],
+      "keywords_hinglish": [
+        "saans lene me takleef",
+        "saans phool rahi hai",
+        "saans ruk rahi hai",
+        "dam ghut raha hai",
+        "saans nahi aa rahi",
+        "saans lene me dikkat",
+        "dam ghutna"
+      ],
+      "keywords_hi": [
+        "सांस लेने में भारी तकलीफ",
+        "सांस लेने में तकलीफ",
+        "दम घुट रहा",
+        "दम घुटना",
+        "सांस फूलना",
+        "सांस नहीं आ रही",
+        "सांस लेने में भारी परेशानी",
+        "दम फूलना"
+      ]
+    },
+    {
+      "type": "stroke_signs",
+      "severity": "critical",
+      "required_resources": ["ct_scan", "neurologist", "icu_bed", "thrombolysis"],
+      "keywords_en": [
+        "stroke",
+        "facial droop",
+        "face drooping",
+        "arm weakness",
+        "slurred speech",
+        "sudden numbness",
+        "paralysis",
+        "sudden loss of vision"
+      ],
+      "keywords_hinglish": [
+        "chehra tedha ho gaya",
+        "ek taraf kamzori",
+        "bolne me ladkhadahat",
+        "lakwa maar gaya",
+        "adhrang",
+        "awaz ladkhada rahi hai",
+        "hath pair sunn ho gaya"
+      ],
+      "keywords_hi": [
+        "लकवा",
+        "चेहरा टेढ़ा होना",
+        "एक तरफ कमजोरी",
+        "आवाज लड़खड़ाना",
+        "अधरंग",
+        "हाथ पैर सुन्न होना"
+      ]
+    },
+    {
+      "type": "heavy_bleeding",
+      "severity": "critical",
+      "required_resources": ["blood_bank", "operation_theatre", "trauma_team"],
+      "keywords_en": [
+        "heavy bleeding",
+        "severe bleeding",
+        "uncontrolled bleeding",
+        "hemorrhage",
+        "blood spurting",
+        "coughing up blood heavily",
+        "vomiting blood"
+      ],
+      "keywords_hinglish": [
+        "bahut khoon beh raha hai",
+        "khoon ruk nahi raha",
+        "khoon ki ulti",
+        "khoon behna band nahi ho raha",
+        "tez khoon nikalna"
+      ],
+      "keywords_hi": [
+        "भारी रक्तस्राव",
+        "खून बहना बंद नहीं हो रहा",
+        "बहुत ज्यादा खून बह रहा है",
+        "खून की उल्टी",
+        "खून बहना"
+      ]
+    },
+    {
+      "type": "unconsciousness",
+      "severity": "critical",
+      "required_resources": ["emergency_physician", "icu_bed", "oxygen"],
+      "keywords_en": [
+        "unconscious",
+        "unresponsive",
+        "fainted",
+        "passed out",
+        "loss of consciousness",
+        "blackout",
+        "comatose",
+        "syncope"
+      ],
+      "keywords_hinglish": [
+        "behosh ho gaya",
+        "behoshi",
+        "hosh me nahi hai",
+        "hosh kho baitha",
+        "koi javab nahi de raha"
+      ],
+      "keywords_hi": [
+        "बेहोश",
+        "मूर्छित",
+        "होश खो बैठा",
+        "होश में नहीं है",
+        "बेहोशी की हालत"
+      ]
+    },
+    {
+      "type": "seizure",
+      "severity": "critical",
+      "required_resources": ["anticonvulsants", "icu_bed", "emergency_physician"],
+      "keywords_en": [
+        "seizure",
+        "convulsion",
+        "fits",
+        "epileptic attack",
+        "shaking uncontrollably",
+        "frothing at mouth"
+      ],
+      "keywords_hinglish": [
+        "mirgi ka daura",
+        "daura pad gaya",
+        "jhatke aa rahe hain",
+        "fits padna",
+        "sharir ainth raha hai"
+      ],
+      "keywords_hi": [
+        "मिर्गी का दौरा",
+        "दौरे पड़ना",
+        "झटके आना",
+        "शरीर ऐंठना"
+      ]
+    },
+    {
+      "type": "snakebite",
+      "severity": "critical",
+      "required_resources": ["asv", "ventilator", "icu_bed", "24x7_doctor"],
+      "keywords_en": [
+        "snake bite",
+        "snakebite",
+        "bitten by snake",
+        "viper bite",
+        "cobra bite",
+        "krait bite"
+      ],
+      "keywords_hinglish": [
+        "saanp ne kaat liya",
+        "saanp ka kaatna",
+        "saanp ne dhas liya",
+        "naag ne kaat liya"
+      ],
+      "keywords_hi": [
+        "सांप ने काट लिया",
+        "सर्प दंश",
+        "सांप का काटना",
+        "नाग ने काटा"
+      ]
+    },
+    {
+      "type": "poisoning",
+      "severity": "critical",
+      "required_resources": ["antidote", "icu_bed", "emergency_physician"],
+      "keywords_en": [
+        "poisoned",
+        "poisoning",
+        "swallowed poison",
+        "consumed poison",
+        "chemical ingestion",
+        "drug overdose",
+        "consumed pesticide"
+      ],
+      "keywords_hinglish": [
+        "zehar kha liya",
+        "zehrila padarth pee liya",
+        "keedemaar dawai pee li",
+        "vishpaan kar liya"
+      ],
+      "keywords_hi": [
+        "जहर खा लिया",
+        "विषाक्तता",
+        "कीटनाशक पी लिया",
+        "जहरीला पदार्थ खा लिया"
+      ]
+    },
+    {
+      "type": "cardiac_palpitations",
+      "severity": "critical",
+      "required_resources": ["ecg", "cardiac_monitor", "defibrillator", "rate_control_drugs", "ccu_bed"],
+      "keywords_en": [
+        "racing heart and fainting",
+        "heart pounding with chest pain",
+        "irregular heartbeat with breathlessness",
+        "severe palpitations with dizziness"
+      ],
+      "keywords_hinglish": [
+        "dhadkan tez aur behoshi",
+        "dil tezi se dhadak raha aur chakkar",
+        "dil ki dhadkan bahut tez aur ghabrahat"
+      ],
+      "keywords_hi": [
+        "धड़कन तेज और बेहोशी",
+        "दिल की धड़कन बहुत तेज़ और चक्कर",
+        "दिल अत्यधिक तेजी से धड़कना"
+      ]
+    },
+    {
+      "type": "severe_trauma",
+      "severity": "critical",
+      "required_resources": ["trauma_team", "blood_bank", "operation_theatre"],
+      "keywords_en": [
+        "major accident",
+        "head injury unconscious",
+        "compound fracture",
+        "bone sticking out",
+        "deep wound head",
+        "severe burns"
+      ],
+      "keywords_hinglish": [
+        "bada accident",
+        "sir par gehri chot",
+        "haddi bahar nikal aayi",
+        "buri tarah jal gaya"
+      ],
+      "keywords_hi": [
+        "गंभीर दुर्घटना",
+        "सिर पर गहरी चोट",
+        "गंभीर जलना",
+        "हड्डी टूट कर बाहर आना"
+      ]
+    },
+    {
+      "type": "anaphylaxis",
+      "severity": "critical",
+      "required_resources": ["epinephrine", "oxygen", "icu_bed"],
+      "keywords_en": [
+        "anaphylaxis",
+        "severe allergic reaction",
+        "throat closing",
+        "tongue swollen cannot breathe",
+        "swollen airway allergy"
+      ],
+      "keywords_hinglish": [
+        "gala band ho raha allergy se",
+        "jeebh soojh gayi saans nahi aa rahi",
+        "bhayankar allergy"
+      ],
+      "keywords_hi": [
+        "गंभीर एलर्जी",
+        "गला सूज कर बंद होना",
+        "जीभ में अत्यधिक सूजन और सांस रुकना"
+      ]
+    }
+  ]
+}
