@@ -60,47 +60,8 @@ The final clinical decision remains with the healthcare professional.
 
 # 🔄 End-to-End Workflow
 
-flowchart LR
-
-    P[👤 Patient]
-
-    UI[🌐 Swasthya Setu UI]
-
-    AI[🤖 AI Intake Layer]
-    SAFE[🛡️ Safety Layer]
-    TRIAGE[📊 Triage Engine]
-
-    API[⚙️ Backend Services]
-    DB[(🗄️ Health Data)]
-
-    DOC[👨‍⚕️ Doctor Dashboard]
-    HOSP[🏥 Hospital Desk]
-    REF[🔄 Referral Service]
-    OCR[🧾 OCR Service]
-    EMER[🚨 Emergency Service]
-
-    P --> UI
-    UI --> AI
-    AI --> SAFE
-    SAFE --> TRIAGE
-
-    TRIAGE --> API
-    AI --> API
-    OCR --> API
-
-    API --> DB
-
-    API --> DOC
-    API --> HOSP
-
-    DOC --> REF
-    REF --> HOSP
-
-    TRIAGE --> EMER
-    EMER --> HOSP
-
-    DB --> DOC
-    DB --> HOSP
+```mermaid
+flowchart TD
 
     A[👤 Patient] --> B[🌐 Language Selection]
     B --> C[🪪 ABHA / New Patient]
